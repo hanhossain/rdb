@@ -1,4 +1,4 @@
-mod file_manager;
+mod file;
 
 fn main() {
     println!("Hello, world!");
