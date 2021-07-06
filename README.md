@@ -3,4 +3,4 @@ A database written in rust
 
 ## TODO:
 - [x] File manager
-- [ ] Buffer manager/cache
+- [ ] Page manager/cache
