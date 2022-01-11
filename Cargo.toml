@@ -8,5 +8,6 @@ edition = "2018"
 
 [dependencies]
 async-trait = "0.1.52"
+lru = "0.7.2"
 tokio = { version = "1.15.0", features = ["full"] }
 uuid = { version = "0.8.2", features = ["v4"] }

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use std::collections::{HashMap, LinkedList};
+use lru::LruCache;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -18,21 +18,19 @@ impl<T: Paged> PageCache<T> {
 
         PageCache {
             content: Mutex::new(PageCacheContent {
-                page_map: HashMap::new(),
-                page_list: LinkedList::new(),
+                cache: LruCache::new(capacity),
             }),
         }
     }
 
     /// Gets a page from the cache.
-    pub async fn get_page(&self, location: usize) -> Arc<T> {
+    pub async fn get_page(&mut self, location: usize) -> Arc<T> {
         let mut cache_content = self.content.lock().await;
-        match cache_content.page_map.get(&location) {
+        match cache_content.cache.get(&location) {
             Some(page) => page.clone(),
             None => {
                 let page = Arc::new(T::open(location).await);
-                cache_content.page_map.insert(location, page.clone());
-                cache_content.page_list.push_back(page.clone());
+                cache_content.cache.put(location, page.clone());
                 page
             }
         }
@@ -40,8 +38,7 @@ impl<T: Paged> PageCache<T> {
 }
 
 struct PageCacheContent<T: Paged> {
-    page_map: HashMap<usize, Arc<T>>,
-    page_list: LinkedList<Arc<T>>,
+    cache: LruCache<usize, Arc<T>>,
 }
 
 #[async_trait]
@@ -68,12 +65,12 @@ mod tests {
         let mut page_cache: PageCache<Page> = PageCache::new(2);
         page_cache.get_page(0).await;
 
-        assert_eq!(page_cache.content.get_mut().page_map.len(), 1);
+        assert_eq!(page_cache.content.get_mut().cache.len(), 1);
     }
 
     #[tokio::test]
     async fn get_same_page_twice() {
-        let page_cache: PageCache<Page> = PageCache::new(2);
+        let mut page_cache: PageCache<Page> = PageCache::new(2);
         let page1 = page_cache.get_page(0).await;
         let page2 = page_cache.get_page(0).await;
 
@@ -82,7 +79,6 @@ mod tests {
 
     #[tokio::test]
     async fn get_and_evict_page() {
-        // TODO: create a linked list/node struct that we can use for the LRU
         let mut page_cache: PageCache<Page> = PageCache::new(2);
 
         {
@@ -93,7 +89,7 @@ mod tests {
         let page2 = page_cache.get_page(1).await;
         let page3 = page_cache.get_page(2).await;
 
-        let pages = &page_cache.content.get_mut().page_map;
+        let pages = &mut page_cache.content.get_mut().cache;
 
         // verify page 0 was evicted
         assert_eq!(2, pages.len());
