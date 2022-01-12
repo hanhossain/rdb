@@ -21,6 +21,7 @@ impl<T: Paged> Deref for CacheContent<T> {
 }
 
 /// An LRU page cache that supports flushing pages with async.
+#[allow(clippy::module_name_repetitions)]
 pub struct PageCache<T: Paged>(Mutex<LruCache<usize, Arc<RwLock<T>>>>);
 
 impl<T: Paged> PageCache<T> {
@@ -47,14 +48,13 @@ impl<T: Paged> PageCache<T> {
             }
         }
 
-        match pages.get(&location) {
-            Some(page) => CacheContent::Existing(Arc::clone(page)),
-            None => {
-                let page = Arc::new(RwLock::new(T::open(location).await));
-                pages.put(location, Arc::clone(&page));
-                CacheContent::New(page)
-            }
+        if let Some(page) = pages.get(&location) {
+            return CacheContent::Existing(Arc::clone(page));
         }
+
+        let page = Arc::new(RwLock::new(T::open(location).await));
+        pages.put(location, Arc::clone(&page));
+        CacheContent::New(page)
     }
 }
 

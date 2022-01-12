@@ -4,6 +4,7 @@ use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, Result, SeekFrom};
 
 /// Manages a file's IO operations.
+#[allow(clippy::module_name_repetitions)]
 pub struct FileManager {
     file: File,
 }
@@ -20,7 +21,7 @@ impl FileManager {
         Ok(FileManager { file })
     }
 
-    /// Reads into `buffer` from `offset.
+    /// Reads into `buffer` from `offset`.
     pub async fn read(&mut self, offset: u64, buffer: &mut [u8]) -> Result<()> {
         // go to the offset
         let _ = self.file.seek(SeekFrom::Start(offset)).await?;
@@ -37,7 +38,7 @@ impl FileManager {
         let _ = self.file.seek(SeekFrom::Start(offset)).await?;
 
         // write at the offset
-        let _ = self.file.write_all(buffer).await?;
+        self.file.write_all(buffer).await?;
 
         // flush to ensure we save to disk before we return
         self.flush().await
