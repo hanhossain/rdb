@@ -1,7 +1,24 @@
+#![allow(dead_code)]
 use async_trait::async_trait;
 use lru::LruCache;
+use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
+
+pub enum CacheContent<T: Paged> {
+    New(Arc<RwLock<T>>),
+    Existing(Arc<RwLock<T>>),
+}
+
+impl<T: Paged> Deref for CacheContent<T> {
+    type Target = Arc<RwLock<T>>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            CacheContent::New(x) | CacheContent::Existing(x) => x,
+        }
+    }
+}
 
 /// An LRU page cache that supports flushing pages with async.
 pub struct PageCache<T: Paged>(Mutex<LruCache<usize, Arc<RwLock<T>>>>);
@@ -18,14 +35,24 @@ impl<T: Paged> PageCache<T> {
     }
 
     /// Gets a page from the cache.
-    pub async fn get_page(&self, location: usize) -> Arc<RwLock<T>> {
+    pub async fn get_page(&self, location: usize) -> CacheContent<T> {
         let mut pages = self.0.lock().await;
+
+        if !pages.contains(&location) && pages.len() == pages.cap() {
+            if let Some((_, prev)) = pages.pop_lru() {
+                // Since this has been removed from the lru while the lru was under an exclusive
+                // lock, this write should be the last write request for the page in the lock queue.
+                let mut lease = prev.write_owned().await;
+                lease.flush().await;
+            }
+        }
+
         match pages.get(&location) {
-            Some(page) => Arc::clone(page),
+            Some(page) => CacheContent::Existing(Arc::clone(page)),
             None => {
                 let page = Arc::new(RwLock::new(T::open(location).await));
                 pages.put(location, Arc::clone(&page));
-                page
+                CacheContent::New(page)
             }
         }
     }
@@ -34,6 +61,7 @@ impl<T: Paged> PageCache<T> {
 #[async_trait]
 pub trait Paged {
     async fn open(location: usize) -> Self;
+    async fn flush(&mut self);
 }
 
 #[cfg(test)]
@@ -44,10 +72,11 @@ mod tests {
     struct Page<T>(Option<T>);
 
     #[async_trait]
-    impl<T> Paged for Page<T> {
+    impl<T: Send + Sync> Paged for Page<T> {
         async fn open(_location: usize) -> Page<T> {
             Page(None)
         }
+        async fn flush(&mut self) {}
     }
 
     #[tokio::test]
@@ -133,5 +162,39 @@ mod tests {
             page_cache.get_page(1).await.read().await.0,
             Some(String::from("world"))
         );
+    }
+
+    #[tokio::test]
+    async fn flush_on_evict() {
+        struct FlushablePage {
+            flushed: bool,
+        }
+        #[async_trait]
+        impl Paged for FlushablePage {
+            async fn open(_location: usize) -> Self {
+                FlushablePage { flushed: false }
+            }
+
+            async fn flush(&mut self) {
+                self.flushed = true;
+            }
+        }
+
+        let page_cache: PageCache<FlushablePage> = PageCache::new(2);
+
+        // insert two values into cache
+        let page1 = page_cache.get_page(0).await;
+        let page2 = page_cache.get_page(1).await;
+
+        // insert third value into cache to evict the first one
+        let page3 = page_cache.get_page(2).await;
+
+        // verify only first page flushed
+        let page1 = page1.read().await;
+        assert!(page1.flushed);
+        let page2 = page2.read().await;
+        assert!(!page2.flushed);
+        let page3 = page3.read().await;
+        assert!(!page3.flushed);
     }
 }
