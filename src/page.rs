@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
 /// An LRU page cache that supports flushing pages with async.
-pub struct PageCache<T: Paged>(Mutex<PageCacheContent<T>>);
+pub struct PageCache<T: Paged>(Mutex<LruCache<usize, Arc<RwLock<T>>>>);
 
 impl<T: Paged> PageCache<T> {
     /// Creates the LRU page cache with a max capacity of `capacity`. This will panic if the
@@ -14,24 +14,22 @@ impl<T: Paged> PageCache<T> {
             panic!("Capacity cannot be 0.");
         }
 
-        PageCache(Mutex::new(PageCacheContent(LruCache::new(capacity))))
+        PageCache(Mutex::new(LruCache::new(capacity)))
     }
 
     /// Gets a page from the cache.
     pub async fn get_page(&self, location: usize) -> Arc<RwLock<T>> {
         let mut pages = self.0.lock().await;
-        match pages.0.get(&location) {
+        match pages.get(&location) {
             Some(page) => Arc::clone(page),
             None => {
                 let page = Arc::new(RwLock::new(T::open(location).await));
-                pages.0.put(location, Arc::clone(&page));
+                pages.put(location, Arc::clone(&page));
                 page
             }
         }
     }
 }
-
-struct PageCacheContent<T: Paged>(LruCache<usize, Arc<RwLock<T>>>);
 
 #[async_trait]
 pub trait Paged {
@@ -57,7 +55,7 @@ mod tests {
         let page_cache: PageCache<Page<()>> = PageCache::new(2);
         page_cache.get_page(0).await;
 
-        assert_eq!(page_cache.0.lock().await.0.len(), 1);
+        assert_eq!(page_cache.0.lock().await.len(), 1);
     }
 
     #[tokio::test]
@@ -90,7 +88,7 @@ mod tests {
             lease.0 = Some(3);
         }
 
-        let pages = &mut page_cache.0.lock().await.0;
+        let pages = &mut page_cache.0.lock().await;
 
         // verify page 0 was evicted
         assert_eq!(2, pages.len());
