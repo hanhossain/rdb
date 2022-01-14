@@ -1,25 +1,9 @@
 #![allow(dead_code)]
 use async_trait::async_trait;
 use lru::LruCache;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
-
-pub enum CacheContent<T: Paged> {
-    New(Arc<RwLock<T>>),
-    Existing(Arc<RwLock<T>>),
-}
-
-impl<T: Paged> Deref for CacheContent<T> {
-    type Target = Arc<RwLock<T>>;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            CacheContent::New(x) | CacheContent::Existing(x) => x,
-        }
-    }
-}
 
 /// An LRU page cache that supports flushing pages with async.
 #[allow(clippy::module_name_repetitions)]
@@ -35,7 +19,7 @@ impl<T: Paged> PageCache<T> {
     }
 
     /// Gets a page from the cache.
-    pub async fn get_page(&self, location: usize) -> CacheContent<T> {
+    pub async fn get_page(&self, location: usize) -> Arc<RwLock<T>> {
         let mut pages = self.0.lock().await;
 
         if !pages.contains(&location) && pages.len() == pages.cap() {
@@ -59,12 +43,12 @@ impl<T: Paged> PageCache<T> {
         }
 
         if let Some(page) = pages.get(&location) {
-            return CacheContent::Existing(Arc::clone(page));
+            return Arc::clone(page);
         }
 
         let page = Arc::new(RwLock::new(T::open(location).await));
         pages.put(location, Arc::clone(&page));
-        CacheContent::New(page)
+        page
     }
 }
 
@@ -179,11 +163,11 @@ mod tests {
         let page_cache: PageCache<Page<()>> = PageCache::new(2);
 
         // insert two values into cache
-        let page1 = Arc::downgrade(&*page_cache.get_page(0).await);
-        let page2 = Arc::downgrade(&*page_cache.get_page(1).await);
+        let page1 = Arc::downgrade(&page_cache.get_page(0).await);
+        let page2 = Arc::downgrade(&page_cache.get_page(1).await);
 
         // insert third value into cache to evict the first one
-        let page3 = Arc::downgrade(&*page_cache.get_page(2).await);
+        let page3 = Arc::downgrade(&page_cache.get_page(2).await);
 
         // verify first page flushed
         assert!(page1.upgrade().is_none());
