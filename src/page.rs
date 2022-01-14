@@ -7,7 +7,7 @@ use tokio::sync::{Mutex, RwLock};
 
 /// An LRU page cache that supports flushing pages with async.
 #[allow(clippy::module_name_repetitions)]
-pub struct PageCache<T: Paged>(Mutex<LruCache<usize, Arc<RwLock<T>>>>);
+pub struct PageCache<T: Paged>(Mutex<LruCache<u64, Arc<RwLock<T>>>>);
 
 impl<T: Paged> PageCache<T> {
     /// Creates the LRU page cache with a max capacity of `capacity`. This will panic if the
@@ -19,7 +19,7 @@ impl<T: Paged> PageCache<T> {
     }
 
     /// Gets a page from the cache.
-    pub async fn get_page(&self, location: usize) -> Arc<RwLock<T>> {
+    pub async fn get_page(&self, location: u64) -> Arc<RwLock<T>> {
         let mut pages = self.0.lock().await;
 
         if !pages.contains(&location) && pages.len() == pages.cap() {
@@ -54,7 +54,7 @@ impl<T: Paged> PageCache<T> {
 
 #[async_trait]
 pub trait Paged {
-    async fn open(location: usize) -> Self;
+    async fn open(location: u64) -> Self;
     async fn close(self);
 }
 
@@ -67,7 +67,7 @@ mod tests {
 
     #[async_trait]
     impl<T: Send + Sync> Paged for Page<T> {
-        async fn open(_location: usize) -> Page<T> {
+        async fn open(_location: u64) -> Page<T> {
             Page(None)
         }
         async fn close(self) {}
