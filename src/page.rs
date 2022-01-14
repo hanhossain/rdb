@@ -29,9 +29,7 @@ impl<T: Paged> PageCache<T> {
     /// Creates the LRU page cache with a max capacity of `capacity`. This will panic if the
     /// capacity is 0.
     pub fn new(capacity: usize) -> PageCache<T> {
-        if capacity == 0 {
-            panic!("Capacity cannot be 0.");
-        }
+        assert_ne!(capacity, 0, "Capacity cannot be 0.");
 
         PageCache(Mutex::new(LruCache::new(capacity)))
     }
