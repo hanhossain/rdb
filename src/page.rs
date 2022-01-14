@@ -50,10 +50,11 @@ impl<T: Paged> PageCache<T> {
                     }
                 }
 
-                // Since this has been removed from the lru while the lru was under an exclusive
-                // lock, this write should be the last write request for the page in the lock queue.
-                let mut lease = prev.write_owned().await;
-                lease.flush().await;
+                // Safety: This is the only reference to this page due to 1) this page was removed
+                // from the lru while the lru was under an exclusive lock, and 2) we checked above
+                // that no other threads have a reference to this page.
+                let prev = unsafe { Arc::try_unwrap(prev).unwrap_unchecked() };
+                prev.into_inner().close().await;
             }
         }
 
@@ -70,7 +71,7 @@ impl<T: Paged> PageCache<T> {
 #[async_trait]
 pub trait Paged {
     async fn open(location: usize) -> Self;
-    async fn flush(&mut self);
+    async fn close(self);
 }
 
 #[cfg(test)]
@@ -85,7 +86,7 @@ mod tests {
         async fn open(_location: usize) -> Page<T> {
             Page(None)
         }
-        async fn flush(&mut self) {}
+        async fn close(self) {}
     }
 
     #[tokio::test]
