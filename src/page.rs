@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use lru::LruCache;
 use std::ops::Deref;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 
 pub enum CacheContent<T: Paged> {
@@ -41,6 +42,16 @@ impl<T: Paged> PageCache<T> {
 
         if !pages.contains(&location) && pages.len() == pages.cap() {
             if let Some((_, prev)) = pages.pop_lru() {
+                // wait until no other threads have a reference to this page
+                loop {
+                    let count = Arc::strong_count(&prev);
+                    if count > 1 {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    } else {
+                        break;
+                    }
+                }
+
                 // Since this has been removed from the lru while the lru was under an exclusive
                 // lock, this write should be the last write request for the page in the lock queue.
                 let mut lease = prev.write_owned().await;
@@ -166,35 +177,20 @@ mod tests {
 
     #[tokio::test]
     async fn flush_on_evict() {
-        struct FlushablePage {
-            flushed: bool,
-        }
-        #[async_trait]
-        impl Paged for FlushablePage {
-            async fn open(_location: usize) -> Self {
-                FlushablePage { flushed: false }
-            }
-
-            async fn flush(&mut self) {
-                self.flushed = true;
-            }
-        }
-
-        let page_cache: PageCache<FlushablePage> = PageCache::new(2);
+        let page_cache: PageCache<Page<()>> = PageCache::new(2);
 
         // insert two values into cache
-        let page1 = page_cache.get_page(0).await;
-        let page2 = page_cache.get_page(1).await;
+        let page1 = Arc::downgrade(&*page_cache.get_page(0).await);
+        let page2 = Arc::downgrade(&*page_cache.get_page(1).await);
 
         // insert third value into cache to evict the first one
-        let page3 = page_cache.get_page(2).await;
+        let page3 = Arc::downgrade(&*page_cache.get_page(2).await);
 
-        // verify only first page flushed
-        let page1 = page1.read().await;
-        assert!(page1.flushed);
-        let page2 = page2.read().await;
-        assert!(!page2.flushed);
-        let page3 = page3.read().await;
-        assert!(!page3.flushed);
+        // verify first page flushed
+        assert!(page1.upgrade().is_none());
+
+        // verify other pages did not
+        assert!(page2.upgrade().is_some());
+        assert!(page3.upgrade().is_some());
     }
 }
