@@ -2,7 +2,6 @@
 use async_trait::async_trait;
 use lru::LruCache;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 
 /// An LRU page cache that supports flushing pages with async.
@@ -25,13 +24,8 @@ impl<T: Paged> PageCache<T> {
         if !pages.contains(&location) && pages.len() == pages.cap() {
             if let Some((_, prev)) = pages.pop_lru() {
                 // wait until no other threads have a reference to this page
-                loop {
-                    let count = Arc::strong_count(&prev);
-                    if count > 1 {
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-                    } else {
-                        break;
-                    }
+                while Arc::strong_count(&prev) > 1 {
+                    tokio::task::yield_now().await;
                 }
 
                 // Safety: This is the only reference to this page due to 1) this page was removed
