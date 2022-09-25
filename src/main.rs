@@ -1,4 +1,3 @@
-#![warn(clippy::pedantic)]
 use async_trait::async_trait;
 use rdb::file::FileManager;
 use rdb::page::{PageCache, Paged};

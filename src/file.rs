@@ -3,7 +3,6 @@ use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, Result, SeekFrom};
 
 /// Manages a file's IO operations.
-#[allow(clippy::module_name_repetitions)]
 pub struct FileManager {
     file: File,
 }

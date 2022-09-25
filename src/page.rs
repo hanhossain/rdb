@@ -5,7 +5,6 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
 /// An LRU page cache that supports flushing pages with async.
-#[allow(clippy::module_name_repetitions)]
 pub struct PageCache<T: Paged>(Mutex<LruCache<u64, Arc<RwLock<T>>>>);
 
 impl<T: Paged> PageCache<T> {
