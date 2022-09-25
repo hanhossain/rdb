@@ -68,6 +68,12 @@ mod tests {
         async fn close(self) {}
     }
 
+    #[test]
+    #[should_panic]
+    fn create_page_cache_zero_capacity() {
+        let _: PageCache<Page<()>> = PageCache::new(0);
+    }
+
     #[tokio::test]
     async fn get_single_page() {
         let page_cache: PageCache<Page<()>> = PageCache::new(2);
