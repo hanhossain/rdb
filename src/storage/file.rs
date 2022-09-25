@@ -1,14 +1,35 @@
-use crate::storage::StorageManager;
+use crate::storage::{Storage, StorageManager};
 use async_trait::async_trait;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, Result, SeekFrom};
 
-/// Manages a file's IO operations.
-pub struct FileManager {
+pub struct FileManager;
+
+#[async_trait]
+impl StorageManager<ManagedFile> for FileManager {
+    /// Creates an instance of `FileManager`.
+    fn new() -> Self {
+        FileManager
+    }
+
+    /// Opens a file handle to `path`. This will create the file if it does not exist.
+    async fn open(&self, path: &str) -> Result<ManagedFile> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(path)
+            .await?;
+        Ok(ManagedFile { file })
+    }
+}
+
+/// IO wrapper for a file.
+pub struct ManagedFile {
     file: File,
 }
 
-impl FileManager {
+impl ManagedFile {
     /// Flushes pending changes to disk. This will attempt to sync all OS-internal metadata.
     async fn flush(&mut self) -> Result<()> {
         self.file.sync_all().await
@@ -16,20 +37,7 @@ impl FileManager {
 }
 
 #[async_trait]
-impl StorageManager for FileManager {
-    type Manager = Self;
-
-    /// Opens a file handle to `path`. This will create the file if it does not exist.
-    async fn open(path: &str) -> Result<Self> {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(path)
-            .await?;
-        Ok(FileManager { file })
-    }
-
+impl Storage for ManagedFile {
     /// Reads into `buffer` from `offset`.
     async fn read(&mut self, offset: u64, buffer: &mut [u8]) -> Result<()> {
         // go to the offset
@@ -84,14 +92,15 @@ mod tests {
     #[tokio::test]
     async fn open() {
         let config = TestConfig::generate();
-
-        FileManager::open(&config.filepath).await.unwrap();
+        let file_manager = FileManager::new();
+        file_manager.open(&config.filepath).await.unwrap();
     }
 
     #[tokio::test]
     async fn write_read_zero_offset() {
         let config = TestConfig::generate();
-        let mut file = FileManager::open(&config.filepath).await.unwrap();
+        let file_manager = FileManager::new();
+        let mut file = file_manager.open(&config.filepath).await.unwrap();
 
         let buffer = [0xDE, 0xAD, 0xBE, 0xEF];
         file.write(0, &buffer).await.unwrap();
@@ -105,7 +114,8 @@ mod tests {
     #[tokio::test]
     async fn write_read_nonzero_offset() {
         let config = TestConfig::generate();
-        let mut file = FileManager::open(&config.filepath).await.unwrap();
+        let file_manager = FileManager::new();
+        let mut file = file_manager.open(&config.filepath).await.unwrap();
 
         let buffer = [0xDE, 0xAD, 0xBE, 0xEF];
         file.write(0, &buffer).await.unwrap();
