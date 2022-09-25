@@ -1,6 +1,8 @@
 #![allow(dead_code)]
+
 use async_trait::async_trait;
 use lru::LruCache;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
@@ -14,14 +16,16 @@ impl<T: Paged> PageCache<T> {
     pub fn new(capacity: usize) -> PageCache<T> {
         assert_ne!(capacity, 0, "Capacity cannot be 0.");
 
-        PageCache(Mutex::new(LruCache::new(capacity)))
+        PageCache(Mutex::new(LruCache::new(
+            NonZeroUsize::try_from(capacity).unwrap(),
+        )))
     }
 
     /// Gets a page from the cache.
     pub async fn get_page(&self, location: u64) -> Arc<RwLock<T>> {
         let mut pages = self.0.lock().await;
 
-        if !pages.contains(&location) && pages.len() == pages.cap() {
+        if !pages.contains(&location) && pages.len() == usize::from(pages.cap()) {
             if let Some((_, prev)) = pages.pop_lru() {
                 // wait until no other threads have a reference to this page
                 while Arc::strong_count(&prev) > 1 {

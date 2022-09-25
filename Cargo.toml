@@ -7,10 +7,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.59"
+anyhow = "1.0.65"
 async-trait = "0.1.57"
-lru = "0.7.2"
-tokio = { version = "1.20.1", features = ["full"] }
+lru = "0.8.0"
+tokio = { version = "1.21.1", features = ["full"] }
 
 [dev-dependencies]
 uuid = { version = "1.1.2", features = ["v4"] }
