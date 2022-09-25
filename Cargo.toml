@@ -11,4 +11,6 @@ anyhow = "1.0.59"
 async-trait = "0.1.57"
 lru = "0.7.2"
 tokio = { version = "1.20.1", features = ["full"] }
+
+[dev-dependencies]
 uuid = { version = "1.1.2", features = ["v4"] }
