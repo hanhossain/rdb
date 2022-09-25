@@ -1,14 +1,13 @@
 #![warn(clippy::pedantic)]
-use crate::file::FileManager;
-use crate::page::{PageCache, Paged};
 use async_trait::async_trait;
+use rdb::file::FileManager;
+use rdb::page::{PageCache, Paged};
 
-mod file;
-mod page;
 const PAGE_SIZE: usize = 4096;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> color_eyre::Result<()> {
+    color_eyre::install()?;
     println!("Hello, world!");
 
     // get a 4KiB buffer and write a string to it
