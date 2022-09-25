@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use rdb::page::{PageCache, Paged};
 use rdb::storage::file::FileManager;
+use rdb::storage::StorageManager;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {

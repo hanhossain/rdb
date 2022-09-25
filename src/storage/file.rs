@@ -1,4 +1,5 @@
-use std::path::Path;
+use crate::storage::StorageManager;
+use async_trait::async_trait;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, Result, SeekFrom};
 
@@ -8,8 +9,18 @@ pub struct FileManager {
 }
 
 impl FileManager {
+    /// Flushes pending changes to disk. This will attempt to sync all OS-internal metadata.
+    async fn flush(&mut self) -> Result<()> {
+        self.file.sync_all().await
+    }
+}
+
+#[async_trait]
+impl StorageManager for FileManager {
+    type Manager = Self;
+
     /// Opens a file handle to `path`. This will create the file if it does not exist.
-    pub async fn open(path: impl AsRef<Path>) -> Result<FileManager> {
+    async fn open(path: &str) -> Result<Self> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -20,7 +31,7 @@ impl FileManager {
     }
 
     /// Reads into `buffer` from `offset`.
-    pub async fn read(&mut self, offset: u64, buffer: &mut [u8]) -> Result<()> {
+    async fn read(&mut self, offset: u64, buffer: &mut [u8]) -> Result<()> {
         // go to the offset
         let _ = self.file.seek(SeekFrom::Start(offset)).await?;
 
@@ -31,7 +42,7 @@ impl FileManager {
     }
 
     /// Writes `buffer` to the `offset`.
-    pub async fn write(&mut self, offset: u64, buffer: &[u8]) -> Result<()> {
+    async fn write(&mut self, offset: u64, buffer: &[u8]) -> Result<()> {
         // go to the offset
         let _ = self.file.seek(SeekFrom::Start(offset)).await?;
 
@@ -41,21 +52,15 @@ impl FileManager {
         // flush to ensure we save to disk before we return
         self.flush().await
     }
-
-    /// Flushes pending changes to disk. This will attempt to sync all OS-internal metadata.
-    async fn flush(&mut self) -> Result<()> {
-        self.file.sync_all().await
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use uuid::Uuid;
 
     struct TestConfig {
-        filepath: PathBuf,
+        filepath: String,
     }
 
     impl TestConfig {
@@ -64,7 +69,9 @@ mod tests {
             let mut filepath = std::env::temp_dir();
             filepath.push(file.to_string());
 
-            TestConfig { filepath }
+            TestConfig {
+                filepath: filepath.to_str().unwrap().to_string(),
+            }
         }
     }
 
