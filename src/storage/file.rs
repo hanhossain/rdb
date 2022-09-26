@@ -1,17 +1,11 @@
-use crate::storage::{Storage, StorageManager};
+use crate::storage::StorageManager;
 use async_trait::async_trait;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, Result, SeekFrom};
 
 pub struct FileManager;
 
-#[async_trait]
-impl StorageManager<ManagedFile> for FileManager {
-    /// Creates an instance of `FileManager`.
-    fn new() -> Self {
-        FileManager
-    }
-
+impl FileManager {
     /// Opens a file handle to `path`. This will create the file if it does not exist.
     async fn open(&self, path: &str) -> Result<ManagedFile> {
         let file = OpenOptions::new()
@@ -20,31 +14,41 @@ impl StorageManager<ManagedFile> for FileManager {
             .create(true)
             .open(path)
             .await?;
-        Ok(ManagedFile { file })
-    }
-}
-
-/// IO wrapper for a file.
-pub struct ManagedFile {
-    file: File,
-}
-
-impl ManagedFile {
-    /// Flushes pending changes to disk. This will attempt to sync all OS-internal metadata.
-    async fn flush(&mut self) -> Result<()> {
-        self.file.sync_all().await
+        Ok(ManagedFile(file))
     }
 }
 
 #[async_trait]
-impl Storage for ManagedFile {
+impl StorageManager for FileManager {
+    /// Creates an instance of `FileManager`.
+    fn new() -> Self {
+        FileManager
+    }
+
+    /// Reads into `buffer` from `offset`.
+    async fn read(&mut self, path: &str, offset: u64, buffer: &mut [u8]) -> Result<()> {
+        let mut file = self.open(path).await?;
+        file.read(offset, buffer).await
+    }
+
+    /// Writes `buffer` to the `offset`.
+    async fn write(&mut self, path: &str, offset: u64, buffer: &[u8]) -> Result<()> {
+        let mut file = self.open(path).await?;
+        file.write(offset, buffer).await
+    }
+}
+
+/// IO wrapper for a file.
+pub struct ManagedFile(File);
+
+impl ManagedFile {
     /// Reads into `buffer` from `offset`.
     async fn read(&mut self, offset: u64, buffer: &mut [u8]) -> Result<()> {
         // go to the offset
-        let _ = self.file.seek(SeekFrom::Start(offset)).await?;
+        let _ = self.0.seek(SeekFrom::Start(offset)).await?;
 
         // read from the offset
-        let _ = self.file.read_exact(buffer).await?;
+        let _ = self.0.read_exact(buffer).await?;
 
         Ok(())
     }
@@ -52,13 +56,18 @@ impl Storage for ManagedFile {
     /// Writes `buffer` to the `offset`.
     async fn write(&mut self, offset: u64, buffer: &[u8]) -> Result<()> {
         // go to the offset
-        let _ = self.file.seek(SeekFrom::Start(offset)).await?;
+        let _ = self.0.seek(SeekFrom::Start(offset)).await?;
 
         // write at the offset
-        self.file.write_all(buffer).await?;
+        self.0.write_all(buffer).await?;
 
         // flush to ensure we save to disk before we return
         self.flush().await
+    }
+
+    /// Flushes pending changes to disk. This will attempt to sync all OS-internal metadata.
+    async fn flush(&mut self) -> Result<()> {
+        self.0.sync_all().await
     }
 }
 
