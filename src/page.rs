@@ -9,13 +9,15 @@ use tokio::sync::{Mutex, RwLock};
 pub struct Page {
     dirty: bool,
     buffer: [u8; PAGE_SIZE],
+    location: u64,
 }
 
 impl Page {
-    fn new() -> Self {
+    fn new(location: u64) -> Self {
         Page {
             dirty: false,
             buffer: [0u8; PAGE_SIZE],
+            location,
         }
     }
 }
@@ -58,7 +60,7 @@ impl<T: StorageManager> PageCache<T> {
                 let prev_page = prev.into_inner();
                 if prev_page.dirty {
                     self.storage_manager
-                        .write(&self.path, location, &prev_page.buffer)
+                        .write(&self.path, prev_page.location, &prev_page.buffer)
                         .await?;
                 }
             }
@@ -68,7 +70,7 @@ impl<T: StorageManager> PageCache<T> {
             return Ok(Arc::clone(page));
         }
 
-        let mut page = Page::new();
+        let mut page = Page::new(location);
         self.storage_manager
             .read(&self.path, location, &mut page.buffer)
             .await?;
@@ -190,7 +192,9 @@ mod tests {
         // insert two values into cache and mark as dirty
         let page1 = {
             let page = &page_cache.get_page(0).await.unwrap();
-            page.write().await.dirty = true;
+            let mut lease = page.write().await;
+            lease.dirty = true;
+            lease.buffer[0] = 1;
             Arc::downgrade(page)
         };
         let page2 = {
@@ -202,11 +206,20 @@ mod tests {
         // insert third value into cache to evict the first one
         let page3 = Arc::downgrade(&page_cache.get_page(2).await.unwrap());
 
-        // verify first page flushed
+        // verify first page evicted
         assert!(page1.upgrade().is_none());
 
         // verify other pages did not
         assert!(page2.upgrade().is_some());
         assert!(page3.upgrade().is_some());
+
+        // verify first page flushed changes
+        let mut buffer = [0u8; PAGE_SIZE];
+        page_cache
+            .storage_manager
+            .read("test", 0, &mut buffer)
+            .await
+            .unwrap();
+        assert_eq!(buffer[0], 1);
     }
 }
