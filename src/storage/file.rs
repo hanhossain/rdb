@@ -6,6 +6,11 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, Result, SeekFrom};
 pub struct FileManager;
 
 impl FileManager {
+    /// Creates an instance of `FileManager`.
+    pub fn new() -> Self {
+        FileManager
+    }
+
     /// Opens a file handle to `path`. This will create the file if it does not exist.
     async fn open(&self, path: &str) -> Result<ManagedFile> {
         let file = OpenOptions::new()
@@ -20,19 +25,14 @@ impl FileManager {
 
 #[async_trait]
 impl StorageManager for FileManager {
-    /// Creates an instance of `FileManager`.
-    fn new() -> Self {
-        FileManager
-    }
-
     /// Reads into `buffer` from `offset`.
-    async fn read(&mut self, path: &str, offset: u64, buffer: &mut [u8]) -> Result<()> {
+    async fn read(&self, path: &str, offset: u64, buffer: &mut [u8]) -> Result<()> {
         let mut file = self.open(path).await?;
         file.read(offset, buffer).await
     }
 
     /// Writes `buffer` to the `offset`.
-    async fn write(&mut self, path: &str, offset: u64, buffer: &[u8]) -> Result<()> {
+    async fn write(&self, path: &str, offset: u64, buffer: &[u8]) -> Result<()> {
         let mut file = self.open(path).await?;
         file.write(offset, buffer).await
     }
