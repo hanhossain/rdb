@@ -3,6 +3,8 @@ pub mod file;
 use async_trait::async_trait;
 #[cfg(test)]
 use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::Arc;
 use tokio::io::Result;
 #[cfg(test)]
 use tokio::sync::Mutex;
@@ -20,13 +22,14 @@ pub trait StorageManager {
 }
 
 #[cfg(test)]
+#[derive(Clone)]
 /// In-memory storage manager used in tests.
-pub struct InMemoryStorageManager(Mutex<HashMap<(String, u64), [u8; PAGE_SIZE]>>);
+pub struct InMemoryStorageManager(Arc<Mutex<HashMap<(String, u64), [u8; PAGE_SIZE]>>>);
 
 #[cfg(test)]
 impl InMemoryStorageManager {
     pub fn new() -> Self {
-        InMemoryStorageManager(Mutex::new(HashMap::new()))
+        InMemoryStorageManager(Arc::new(Mutex::new(HashMap::new())))
     }
 }
 

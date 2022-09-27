@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, Result, SeekFrom};
 
+#[derive(Clone)]
 pub struct FileManager;
 
 impl FileManager {

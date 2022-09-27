@@ -222,4 +222,17 @@ mod tests {
             .unwrap();
         assert_eq!(buffer[0], 1);
     }
+
+    #[tokio::test]
+    async fn get_single_page_two_files() {
+        let storage_manager = InMemoryStorageManager::new();
+        let foo_cache = PageCache::new(storage_manager.clone(), "foo", 2);
+        let bar_cache = PageCache::new(storage_manager, "bar", 2);
+
+        foo_cache.get_page(0).await.unwrap();
+        bar_cache.get_page(0).await.unwrap();
+
+        assert_eq!(foo_cache.store.lock().await.len(), 1);
+        assert_eq!(bar_cache.store.lock().await.len(), 1);
+    }
 }
