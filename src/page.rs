@@ -79,6 +79,25 @@ impl<T: StorageManager> PageCache<T> {
         pages.put(location, Arc::clone(&page));
         Ok(page)
     }
+
+    /// Flushes all dirty pages and marks them all as clean.
+    pub async fn flush(&self) -> Result<()> {
+        let mut pages = self.store.lock().await;
+
+        for (_, v) in pages.iter_mut() {
+            let mut page = v.write().await;
+            if page.dirty {
+                self.storage_manager
+                    .write(&self.path, page.location, &page.buffer)
+                    .await?;
+                page.dirty = false;
+            }
+
+            eprintln!("{:?}", page);
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -234,5 +253,56 @@ mod tests {
 
         assert_eq!(foo_cache.store.lock().await.len(), 1);
         assert_eq!(bar_cache.store.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn flush_all() {
+        async fn modify_cache(cache: &PageCache<InMemoryStorageManager>, location: u64) {
+            let page = cache.get_page(location).await.unwrap();
+            let mut lease = page.write().await;
+            lease.dirty = true;
+            lease.buffer[0] = 1;
+        }
+
+        let storage_manager = InMemoryStorageManager::new();
+        let page_cache = PageCache::new(storage_manager.clone(), "test", 2);
+        modify_cache(&page_cache, 0).await;
+        modify_cache(&page_cache, 1).await;
+
+        // ensure pages are dirty before flush
+        assert!(page_cache.get_page(0).await.unwrap().read().await.dirty);
+        assert!(page_cache.get_page(1).await.unwrap().read().await.dirty);
+
+        // flush all
+        page_cache.flush().await.unwrap();
+
+        // ensure all data was flushed
+        let mut expected = [0u8; PAGE_SIZE];
+        expected[0] = 1;
+        {
+            let lease = storage_manager.0.lock().await;
+            let buffer1 = lease.get(&("test".to_string(), 0)).unwrap();
+            assert_eq!(buffer1, &expected);
+
+            let buffer2 = lease.get(&("test".to_string(), 1)).unwrap();
+            assert_eq!(buffer2, &expected);
+        }
+
+        // ensure clean pages are in cache with new data
+        async fn assert_clean_page_in_cache(
+            cache: &PageCache<InMemoryStorageManager>,
+            expected: &[u8; PAGE_SIZE],
+            location: u64,
+        ) {
+            let lease = cache.get_page(location).await.unwrap();
+            let page = lease.read().await;
+            assert!(!page.dirty);
+            assert_eq!(&page.buffer, expected);
+        }
+        assert_clean_page_in_cache(&page_cache, &expected, 0).await;
+        assert_clean_page_in_cache(&page_cache, &expected, 1).await;
+
+        assert!(!page_cache.get_page(0).await.unwrap().read().await.dirty);
+        assert!(!page_cache.get_page(1).await.unwrap().read().await.dirty);
     }
 }

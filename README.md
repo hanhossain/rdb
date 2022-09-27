@@ -4,6 +4,7 @@ A database written in rust
 # Design
 ## Page Cache (Buffer manager)
 LRU cache to manage the pages in memory. When a page gets evicted, it will ask the storage layer to flush the page.
+This also supports flushing all pages (used for periodic flushing).
 
 ## File Manager
 Directly interacts with the file system. When the page manager requests a page from storage, the file manager will

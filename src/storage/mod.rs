@@ -25,7 +25,7 @@ pub mod tests {
     #[cfg(test)]
     #[derive(Clone)]
     /// In-memory storage manager used in tests.
-    pub struct InMemoryStorageManager(Arc<Mutex<HashMap<(String, u64), [u8; PAGE_SIZE]>>>);
+    pub struct InMemoryStorageManager(pub Arc<Mutex<HashMap<(String, u64), [u8; PAGE_SIZE]>>>);
 
     #[cfg(test)]
     impl InMemoryStorageManager {
