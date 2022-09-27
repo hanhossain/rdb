@@ -84,7 +84,7 @@ impl<T: StorageManager> PageCache<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::InMemoryStorageManager;
+    use crate::storage::tests::InMemoryStorageManager;
 
     #[test]
     #[should_panic]
