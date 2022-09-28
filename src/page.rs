@@ -23,6 +23,7 @@ impl Page {
 }
 
 /// An LRU page cache that supports flushing pages with async.
+#[derive(Debug)]
 pub struct PageCache<T: StorageManager> {
     path: String,
     store: Mutex<LruCache<u64, Arc<RwLock<Page>>>>,
