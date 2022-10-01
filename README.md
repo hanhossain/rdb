@@ -25,11 +25,10 @@ handle opening, reading, and writing to the file.
 
 ### KV Store
 A key-value store for system metadata. Supports
-- insert value
-- get value by key
-- TODO: update value
-  - Should use an append-only process. The store will use the newest object in the blob.
+- insert/update value
+  - Uses an append-only process. The store will use the newest object in the blob.
   - Eventually this should have a compaction process to clean up the old objects.
+- get value by key
 
 ## Tables
 ### System Defined

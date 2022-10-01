@@ -6,7 +6,13 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::io::Result;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct KVEntryContext {
+    pub location: u64,
+    pub size: u64,
+}
 
 #[derive(Debug)]
 struct KVStoreInner<T: StorageManager> {
@@ -32,13 +38,19 @@ impl<S: StorageManager> KVStore<S> {
         KVStore(Arc::new(Mutex::new(inner)))
     }
 
-    // TODO: upsert
-    pub async fn insert<T: Serialize + DeserializeOwned + Debug>(
+    pub async fn insert<T: Serialize + DeserializeOwned + PartialEq>(
         &self,
         key: &str,
         value: &T,
-    ) -> Result<()> {
+    ) -> Result<Option<KVEntryContext>> {
         let mut lease = self.0.lock().await;
+
+        if let Some(existing_item) = self.get_internal::<T>(key, &lease).await? {
+            if &existing_item == value {
+                return Ok(None);
+            }
+        }
+
         let pair = KVPair {
             location: lease.next_location,
             key: key.to_string(),
@@ -57,11 +69,22 @@ impl<S: StorageManager> KVStore<S> {
         lease.store.insert(key.to_string(), pair.location);
         lease.next_location += size;
 
-        Ok(())
+        Ok(Some(KVEntryContext {
+            size,
+            location: pair.location,
+        }))
     }
 
-    pub async fn get<T: DeserializeOwned + Debug>(&self, key: &str) -> Result<Option<T>> {
+    pub async fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
         let lease = self.0.lock().await;
+        self.get_internal(key, &lease).await
+    }
+
+    async fn get_internal<'a, T: DeserializeOwned>(
+        &'a self,
+        key: &str,
+        lease: &MutexGuard<'a, KVStoreInner<S>>,
+    ) -> Result<Option<T>> {
         let result = match lease.store.get(key) {
             None => None,
             Some(location) => {
@@ -91,6 +114,11 @@ mod tests {
     use super::*;
     use crate::storage::tests::InMemoryStorageManager;
 
+    #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
+    struct TestContent {
+        int: i32,
+    }
+
     #[test]
     fn create_kv_store() {
         let storage_manager = InMemoryStorageManager::new();
@@ -100,11 +128,6 @@ mod tests {
 
     #[tokio::test]
     async fn get_and_insert_struct() {
-        #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
-        struct TestContent {
-            int: i32,
-        }
-
         // initialize kv store
         let storage_manager = InMemoryStorageManager::new();
         let page_cache = Arc::new(PageCache::new(storage_manager.clone(), "test", 2));
@@ -125,5 +148,58 @@ mod tests {
 
         let actual2: TestContent = kv_store.get("expected2").await.unwrap().unwrap();
         assert_eq!(expected2, actual2);
+    }
+
+    #[tokio::test]
+    async fn insert_same_struct() {
+        // initialize kv store
+        let storage_manager = InMemoryStorageManager::new();
+        let page_cache = Arc::new(PageCache::new(storage_manager.clone(), "test", 2));
+        let kv_store = KVStore::new(page_cache.clone());
+
+        // insert 1
+        let expected = TestContent { int: 1 };
+        kv_store
+            .insert("expected", &expected)
+            .await
+            .unwrap()
+            .unwrap();
+        page_cache.flush().await.unwrap();
+
+        // insert 2
+        let context2 = kv_store.insert("expected", &expected).await.unwrap();
+        page_cache.flush().await.unwrap();
+        assert!(context2.is_none());
+    }
+
+    #[tokio::test]
+    async fn insert_and_update_struct() {
+        // initialize kv store
+        let storage_manager = InMemoryStorageManager::new();
+        let page_cache = Arc::new(PageCache::new(storage_manager.clone(), "test", 2));
+        let kv_store = KVStore::new(page_cache.clone());
+
+        // insert 1
+        let original = TestContent { int: 1 };
+        let orig_ctx = kv_store
+            .insert("expected", &original)
+            .await
+            .unwrap()
+            .unwrap();
+        page_cache.flush().await.unwrap();
+
+        let expected = TestContent { int: 42 };
+        let new_ctx = kv_store
+            .insert("expected", &expected)
+            .await
+            .unwrap()
+            .unwrap();
+        page_cache.flush().await.unwrap();
+
+        // verify it's not using the same location on disk
+        assert_ne!(new_ctx, orig_ctx);
+
+        let actual: TestContent = kv_store.get("expected").await.unwrap().unwrap();
+        assert_eq!(expected, actual);
     }
 }
