@@ -20,6 +20,15 @@ impl Page {
             location,
         }
     }
+
+    pub fn buffer(&self) -> &[u8] {
+        self.buffer.as_ref()
+    }
+
+    pub fn buffer_mut(&mut self) -> &mut [u8] {
+        self.dirty = true;
+        self.buffer.as_mut()
+    }
 }
 
 /// An LRU page cache that supports flushing pages with async.
@@ -93,18 +102,31 @@ impl<T: StorageManager> PageCache<T> {
                     .await?;
                 page.dirty = false;
             }
-
-            eprintln!("{:?}", page);
         }
 
         Ok(())
     }
 }
 
+pub fn start_of_page(location: u64) -> u64 {
+    location / PAGE_SIZE as u64 * PAGE_SIZE as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::storage::tests::InMemoryStorageManager;
+
+    #[test]
+    fn test_start_of_page() {
+        assert_eq!(start_of_page(0), 0);
+        assert_eq!(start_of_page(1), 0);
+        assert_eq!(start_of_page(4095), 0);
+        assert_eq!(start_of_page(4096), 4096);
+        assert_eq!(start_of_page(4097), 4096);
+        assert_eq!(start_of_page(8191), 4096);
+        assert_eq!(start_of_page(8192), 8192);
+    }
 
     #[test]
     #[should_panic]
