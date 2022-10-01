@@ -23,6 +23,14 @@ handle opening, reading, and writing to the file.
     - primary tree will have all tuples, index trees will only have the index and primary key.
 - node buffer is a full page
 
+### KV Store
+A key-value store for system metadata. Supports
+- insert value
+- get value by key
+- TODO: update value
+  - Should use an append-only process. The store will use the newest object in the blob.
+  - Eventually this should have a compaction process to clean up the old objects.
+
 ## Tables
 ### System Defined
 - Holds metadata about the system.

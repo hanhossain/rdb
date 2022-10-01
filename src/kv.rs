@@ -16,6 +16,7 @@ struct KVStoreInner<T: StorageManager> {
     next_location: u64,
 }
 
+// TODO: need to be able to load a kv store from a file
 /// A key-value store used for system metadata.
 #[derive(Debug, Clone)]
 pub struct KVStore<S: StorageManager>(Arc<Mutex<KVStoreInner<S>>>);
@@ -31,6 +32,7 @@ impl<S: StorageManager> KVStore<S> {
         KVStore(Arc::new(Mutex::new(inner)))
     }
 
+    // TODO: upsert
     pub async fn insert<T: Serialize + DeserializeOwned + Debug>(
         &self,
         key: &str,
