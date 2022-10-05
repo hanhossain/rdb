@@ -4,9 +4,31 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::mem::size_of;
 use std::sync::Arc;
 use tokio::io::Result;
 use tokio::sync::{Mutex, MutexGuard};
+
+const KEY_SIZE_SIZE: usize = size_of::<u64>();
+const VALUE_SIZE_SIZE: usize = size_of::<u64>();
+
+/// The serialized key-value pair.
+///
+/// Memory layout:
+/// | key size | key | value size | value |
+#[derive(Debug, Serialize, Deserialize)]
+struct KVPair {
+    #[serde(skip)]
+    location: u64,
+    key: String,
+    value: Vec<u8>,
+}
+
+impl KVPair {
+    fn is_empty(&self) -> bool {
+        self.key.is_empty() && self.value.is_empty()
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct KVEntryContext {
@@ -22,7 +44,7 @@ struct KVStoreInner<T: StorageManager> {
     next_location: u64,
 }
 
-// TODO: need to be able to load a kv store from a file
+// TODO: need to be able to save to the next page when prev page is full.
 /// A key-value store used for system metadata.
 #[derive(Debug, Clone)]
 pub struct KVStore<S: StorageManager>(Arc<Mutex<KVStoreInner<S>>>);
@@ -36,6 +58,54 @@ impl<S: StorageManager> KVStore<S> {
             next_location: 0,
         };
         KVStore(Arc::new(Mutex::new(inner)))
+    }
+
+    pub async fn open(page_cache: Arc<PageCache<S>>) -> Result<Self> {
+        let mut next_location = 0;
+        let mut store = HashMap::new();
+
+        loop {
+            let page = page_cache.get_page(next_location).await?;
+            let mut lease = page.write().await;
+            let buffer = lease.buffer_mut();
+            let mut offset = 0;
+
+            loop {
+                let pair: KVPair = bincode::deserialize(&buffer[offset..]).unwrap();
+                if pair.is_empty() {
+                    break;
+                }
+
+                store.insert(pair.key, pair.location);
+
+                // figure out where the next pair is
+                let key_size =
+                    u64::from_ne_bytes(buffer[offset..offset + KEY_SIZE_SIZE].try_into().unwrap());
+                let value_index = KEY_SIZE_SIZE + key_size as usize;
+                let value_size = u64::from_ne_bytes(
+                    buffer[value_index..value_index + VALUE_SIZE_SIZE]
+                        .try_into()
+                        .unwrap(),
+                );
+                let size =
+                    KEY_SIZE_SIZE + key_size as usize + VALUE_SIZE_SIZE + value_size as usize;
+                offset += size;
+            }
+
+            // Page was empty. This only happens when it's the last page.
+            if offset == 0 {
+                break;
+            }
+
+            next_location += offset as u64;
+        }
+
+        let inner = KVStoreInner {
+            next_location,
+            page_cache,
+            store,
+        };
+        Ok(KVStore(Arc::new(Mutex::new(inner))))
     }
 
     pub async fn insert<T: Serialize + DeserializeOwned + PartialEq>(
@@ -99,14 +169,6 @@ impl<S: StorageManager> KVStore<S> {
         };
         Ok(result)
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct KVPair {
-    #[serde(skip)]
-    location: u64,
-    key: String,
-    value: Vec<u8>,
 }
 
 #[cfg(test)]
@@ -201,5 +263,34 @@ mod tests {
 
         let actual: TestContent = kv_store.get("expected").await.unwrap().unwrap();
         assert_eq!(expected, actual);
+    }
+
+    #[tokio::test]
+    async fn load_from_file() {
+        let storage_manager = InMemoryStorageManager::new();
+        let expected = TestContent { int: 1 };
+
+        {
+            let page_cache = Arc::new(PageCache::new(storage_manager.clone(), "test", 2));
+            let kv_store = KVStore::new(page_cache.clone());
+
+            // insert
+            let a = kv_store.insert("expected", &expected).await.unwrap();
+            dbg!(&a);
+            page_cache.flush().await.unwrap();
+
+            // verify inserted
+            let actual1: TestContent = kv_store.get("expected").await.unwrap().unwrap();
+            assert_eq!(expected, actual1);
+        }
+
+        {
+            let page_cache = Arc::new(PageCache::new(storage_manager.clone(), "test", 2));
+            let kv_store = KVStore::open(page_cache).await.unwrap();
+
+            // verify expected exists
+            let actual: TestContent = kv_store.get("expected").await.unwrap().unwrap();
+            assert_eq!(expected, actual);
+        }
     }
 }
