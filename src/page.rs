@@ -1,15 +1,29 @@
 use crate::storage::{StorageManager, PAGE_SIZE};
 use lru::LruCache;
+use serde::{Deserialize, Serialize};
+use std::mem::size_of;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tokio::io::Result;
 use tokio::sync::{Mutex, RwLock};
+
+pub const HEADER_SIZE: usize = size_of::<Header>();
+
+/// Header to denote size on page.
+///
+/// Memory layout:
+/// | size |
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Eq, PartialEq)]
+pub struct Header {
+    pub size: u16,
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Page {
     dirty: bool,
     buffer: [u8; PAGE_SIZE],
     location: u64,
+    pub header: Header,
 }
 
 impl Page {
@@ -18,6 +32,7 @@ impl Page {
             dirty: false,
             buffer: [0u8; PAGE_SIZE],
             location,
+            header: Header { size: 0 },
         }
     }
 
@@ -28,6 +43,10 @@ impl Page {
     pub fn buffer_mut(&mut self) -> &mut [u8] {
         self.dirty = true;
         self.buffer.as_mut()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.header.size == 0
     }
 }
 
@@ -54,6 +73,9 @@ impl<T: StorageManager> PageCache<T> {
 
     /// Gets a page from the cache.
     pub async fn get_page(&self, location: u64) -> Result<Arc<RwLock<Page>>> {
+        // get the base of the page
+        let location = start_of_page(location);
+
         let mut pages = self.store.lock().await;
 
         if !pages.contains(&location) && pages.len() == usize::from(pages.cap()) {
@@ -84,6 +106,7 @@ impl<T: StorageManager> PageCache<T> {
         self.storage_manager
             .read(&self.path, location, &mut page.buffer)
             .await?;
+        page.header = bincode::deserialize(&page.buffer[..HEADER_SIZE]).unwrap();
 
         let page = Arc::new(RwLock::new(page));
         pages.put(location, Arc::clone(&page));
@@ -160,16 +183,16 @@ mod tests {
         let page_cache = PageCache::new(storage_manager, "test", 2);
 
         // get and release page 1
-        let _ = page_cache.get_page(1).await.unwrap();
+        let _ = page_cache.get_page(0).await.unwrap();
 
-        let page2 = page_cache.get_page(2).await.unwrap();
+        let page2 = page_cache.get_page(4096).await.unwrap();
         {
             let mut lease = page2.write().await;
             lease.dirty = true;
             lease.buffer[0] = 2;
         }
 
-        let page3 = page_cache.get_page(3).await.unwrap();
+        let page3 = page_cache.get_page(8192).await.unwrap();
         {
             let mut lease = page3.write().await;
             lease.dirty = true;
@@ -183,8 +206,8 @@ mod tests {
         assert!(pages.get(&0).is_none());
 
         // verify pages 1 and 2 are still cached
-        assert_eq!(2, pages.get(&2).unwrap().read().await.buffer[0]);
-        assert_eq!(3, pages.get(&3).unwrap().read().await.buffer[0]);
+        assert_eq!(2, pages.get(&4096).unwrap().read().await.buffer[0]);
+        assert_eq!(3, pages.get(&8192).unwrap().read().await.buffer[0]);
     }
 
     #[tokio::test]
@@ -194,7 +217,7 @@ mod tests {
 
         // insert two values into cache
         let _ = page_cache.get_page(0).await.unwrap();
-        let _ = page_cache.get_page(1).await.unwrap();
+        let _ = page_cache.get_page(4096).await.unwrap();
 
         // get and mutate the values in parallel
         let cache1 = Arc::clone(&page_cache);
@@ -207,7 +230,7 @@ mod tests {
 
         let cache2 = Arc::clone(&page_cache);
         let task2 = tokio::spawn(async move {
-            let page = cache2.get_page(1).await.unwrap();
+            let page = cache2.get_page(4096).await.unwrap();
             let mut lease = page.write().await;
             lease.dirty = true;
             lease.buffer[..5].copy_from_slice(b"world");
@@ -221,7 +244,7 @@ mod tests {
             b"hello"
         );
         assert_eq!(
-            &page_cache.get_page(1).await.unwrap().read().await.buffer[..5],
+            &page_cache.get_page(4096).await.unwrap().read().await.buffer[..5],
             b"world"
         );
     }
@@ -240,13 +263,13 @@ mod tests {
             Arc::downgrade(page)
         };
         let page2 = {
-            let page = &page_cache.get_page(1).await.unwrap();
+            let page = &page_cache.get_page(4096).await.unwrap();
             page.write().await.dirty = true;
             Arc::downgrade(page)
         };
 
         // insert third value into cache to evict the first one
-        let page3 = Arc::downgrade(&page_cache.get_page(2).await.unwrap());
+        let page3 = Arc::downgrade(&page_cache.get_page(8192).await.unwrap());
 
         // verify first page evicted
         assert!(page1.upgrade().is_none());
@@ -290,11 +313,11 @@ mod tests {
         let storage_manager = InMemoryStorageManager::new();
         let page_cache = PageCache::new(storage_manager.clone(), "test", 2);
         modify_cache(&page_cache, 0).await;
-        modify_cache(&page_cache, 1).await;
+        modify_cache(&page_cache, 4096).await;
 
         // ensure pages are dirty before flush
         assert!(page_cache.get_page(0).await.unwrap().read().await.dirty);
-        assert!(page_cache.get_page(1).await.unwrap().read().await.dirty);
+        assert!(page_cache.get_page(4096).await.unwrap().read().await.dirty);
 
         // flush all
         page_cache.flush().await.unwrap();
@@ -307,7 +330,7 @@ mod tests {
             let buffer1 = lease.get(&("test".to_string(), 0)).unwrap();
             assert_eq!(buffer1, &expected);
 
-            let buffer2 = lease.get(&("test".to_string(), 1)).unwrap();
+            let buffer2 = lease.get(&("test".to_string(), 4096)).unwrap();
             assert_eq!(buffer2, &expected);
         }
 

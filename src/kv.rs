@@ -1,5 +1,5 @@
-use crate::page::{start_of_page, PageCache};
-use crate::storage::StorageManager;
+use crate::page::{start_of_page, PageCache, HEADER_SIZE};
+use crate::storage::{StorageManager, PAGE_SIZE};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -44,7 +44,7 @@ struct KVStoreInner<T: StorageManager> {
     next_location: u64,
 }
 
-// TODO: need to be able to save to the next page when prev page is full.
+// TODO: need to be able to save entries larger than 4096 bytes
 /// A key-value store used for system metadata.
 #[derive(Debug, Clone)]
 pub struct KVStore<S: StorageManager>(Arc<Mutex<KVStoreInner<S>>>);
@@ -55,20 +55,29 @@ impl<S: StorageManager> KVStore<S> {
         let inner = KVStoreInner {
             store: HashMap::new(),
             page_cache,
-            next_location: 0,
+            next_location: HEADER_SIZE as u64,
         };
         KVStore(Arc::new(Mutex::new(inner)))
     }
 
     pub async fn open(page_cache: Arc<PageCache<S>>) -> Result<Self> {
-        let mut next_location = 0;
+        let mut page_location = 0;
+        let mut next_location = HEADER_SIZE as u64;
         let mut store = HashMap::new();
 
         loop {
-            let page = page_cache.get_page(next_location).await?;
-            let mut lease = page.write().await;
-            let buffer = lease.buffer_mut();
-            let mut offset = 0;
+            let page = page_cache.get_page(page_location).await?;
+
+            // exclusive lease b/c we don't need anything else reading it while we open the store
+            let lease = page.write().await;
+
+            // Page is only empty if it's the last page
+            if lease.is_empty() {
+                break;
+            }
+
+            let buffer = lease.buffer();
+            let mut offset = HEADER_SIZE;
 
             loop {
                 let pair: KVPair = bincode::deserialize(&buffer[offset..]).unwrap();
@@ -76,12 +85,16 @@ impl<S: StorageManager> KVStore<S> {
                     break;
                 }
 
-                store.insert(pair.key, pair.location);
+                if start_of_page(next_location) < page_location {
+                    next_location = page_location + HEADER_SIZE as u64;
+                }
+
+                store.insert(pair.key, next_location);
 
                 // figure out where the next pair is
                 let key_size =
                     u64::from_ne_bytes(buffer[offset..offset + KEY_SIZE_SIZE].try_into().unwrap());
-                let value_index = KEY_SIZE_SIZE + key_size as usize;
+                let value_index = offset + KEY_SIZE_SIZE + key_size as usize;
                 let value_size = u64::from_ne_bytes(
                     buffer[value_index..value_index + VALUE_SIZE_SIZE]
                         .try_into()
@@ -90,14 +103,10 @@ impl<S: StorageManager> KVStore<S> {
                 let size =
                     KEY_SIZE_SIZE + key_size as usize + VALUE_SIZE_SIZE + value_size as usize;
                 offset += size;
+                next_location += size as u64;
             }
 
-            // Page was empty. This only happens when it's the last page.
-            if offset == 0 {
-                break;
-            }
-
-            next_location += offset as u64;
+            page_location += PAGE_SIZE as u64;
         }
 
         let inner = KVStoreInner {
@@ -121,23 +130,36 @@ impl<S: StorageManager> KVStore<S> {
             }
         }
 
-        let pair = KVPair {
+        let mut pair = KVPair {
             location: lease.next_location,
             key: key.to_string(),
             value: bincode::serialize(value).unwrap(),
         };
 
-        let page_location = start_of_page(pair.location);
-        let offset = (pair.location - page_location) as usize;
+        let mut page_location = start_of_page(pair.location);
+        let mut offset = (pair.location - page_location) as usize;
+        let size = bincode::serialized_size(&pair).unwrap();
+
+        if offset + size as usize >= PAGE_SIZE {
+            // next page
+            page_location += PAGE_SIZE as u64;
+
+            // pair will be at the start of the next page
+            pair.location = page_location + HEADER_SIZE as u64;
+            offset = HEADER_SIZE;
+        }
+
         let page = lease.page_cache.get_page(page_location).await?;
         let mut page = page.write().await;
+        page.header.size += size as u16;
+        let header = page.header;
         let buffer = page.buffer_mut();
 
-        let size = bincode::serialized_size(&pair).unwrap();
         bincode::serialize_into(&mut buffer[offset..offset + size as usize], &pair).unwrap();
+        bincode::serialize_into(&mut buffer[..HEADER_SIZE], &header).unwrap();
 
         lease.store.insert(key.to_string(), pair.location);
-        lease.next_location += size;
+        lease.next_location = pair.location + size;
 
         Ok(Some(KVEntryContext {
             size,
@@ -275,8 +297,7 @@ mod tests {
             let kv_store = KVStore::new(page_cache.clone());
 
             // insert
-            let a = kv_store.insert("expected", &expected).await.unwrap();
-            dbg!(&a);
+            kv_store.insert("expected", &expected).await.unwrap();
             page_cache.flush().await.unwrap();
 
             // verify inserted
@@ -290,6 +311,72 @@ mod tests {
 
             // verify expected exists
             let actual: TestContent = kv_store.get("expected").await.unwrap().unwrap();
+            assert_eq!(expected, actual);
+        }
+    }
+
+    #[tokio::test]
+    async fn overflow_into_second_page() {
+        // initialize kv store
+        let storage_manager = InMemoryStorageManager::new();
+        let page_cache = Arc::new(PageCache::new(storage_manager, "test", 2));
+        let kv_store = KVStore::new(page_cache.clone());
+
+        let mut expected = Vec::new();
+
+        for i in 0..183 {
+            let value = TestContent { int: i };
+            let context = kv_store
+                .insert(&i.to_string(), &value)
+                .await
+                .unwrap()
+                .unwrap();
+            expected.push(value);
+        }
+        page_cache.flush().await.unwrap();
+
+        let mut actual = Vec::new();
+        for i in 0..183 {
+            let value: TestContent = kv_store.get(&i.to_string()).await.unwrap().unwrap();
+            actual.push(value);
+        }
+
+        assert_eq!(expected, actual);
+    }
+
+    #[tokio::test]
+    async fn load_two_pages_from_file() {
+        // initialize kv store
+        let storage_manager = InMemoryStorageManager::new();
+        let mut expected = Vec::new();
+
+        {
+            let page_cache = Arc::new(PageCache::new(storage_manager.clone(), "test", 2));
+            let kv_store = KVStore::new(page_cache.clone());
+
+            for i in 0..183 {
+                let value = TestContent { int: i };
+                kv_store
+                    .insert(&i.to_string(), &value)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                expected.push(value);
+            }
+
+            page_cache.flush().await.unwrap();
+        }
+
+        {
+            let page_cache = Arc::new(PageCache::new(storage_manager, "test", 2));
+            let kv_store = KVStore::open(page_cache).await.unwrap();
+
+            let mut actual = Vec::new();
+            for i in 0..183 {
+                let value: TestContent = kv_store.get(&i.to_string()).await.unwrap().unwrap();
+                actual.push(value);
+            }
+
             assert_eq!(expected, actual);
         }
     }
