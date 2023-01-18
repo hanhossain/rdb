@@ -53,7 +53,7 @@ users:
 #### Example table
 | id | username | firstName | lastName |
 | - | - | - | - |
-| 1 | ironman | Tony | Stark 
+| 1 | ironman | Tony | Stark |
 | 2 | hulk | Bruce | Banner |
 
 ## TODO:
