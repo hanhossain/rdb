@@ -23,7 +23,7 @@ pub mod tests {
     use tokio::sync::Mutex;
 
     #[cfg(test)]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     /// In-memory storage manager used in tests.
     pub struct InMemoryStorageManager(pub Arc<Mutex<HashMap<(String, u64), [u8; PAGE_SIZE]>>>);
 

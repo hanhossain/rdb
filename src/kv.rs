@@ -326,8 +326,18 @@ mod tests {
 
         let mut expected = Vec::new();
 
-        for i in 0..183 {
-            let value = TestContent { int: i };
+        // insert one
+        let value = TestContent { int: 0 };
+        let context = kv_store.insert("0", &value).await.unwrap().unwrap();
+        expected.push(value);
+
+        // calculate how many need to be inserted to overflow
+        let page_data_size = PAGE_SIZE - HEADER_SIZE;
+        let max_records_per_page = page_data_size as u64 / context.size;
+        let total_records = max_records_per_page + 1;
+
+        for i in 1..total_records {
+            let value = TestContent { int: i as i32 };
             let _context = kv_store
                 .insert(&i.to_string(), &value)
                 .await
@@ -340,7 +350,7 @@ mod tests {
         assert_eq!(pages_flushed, 2);
 
         let mut actual = Vec::new();
-        for i in 0..183 {
+        for i in 0..total_records {
             let value: TestContent = kv_store.get(&i.to_string()).await.unwrap().unwrap();
             actual.push(value);
         }
@@ -354,12 +364,22 @@ mod tests {
         let storage_manager = InMemoryStorageManager::new();
         let mut expected = Vec::new();
 
-        {
+        let total_records = {
             let page_cache = Arc::new(PageCache::new(storage_manager.clone(), "test", 2));
             let kv_store = KVStore::new(page_cache.clone());
 
-            for i in 0..183 {
-                let value = TestContent { int: i };
+            // insert one
+            let value = TestContent { int: 0 };
+            let context = kv_store.insert("0", &value).await.unwrap().unwrap();
+            expected.push(value);
+
+            // calculate how many need to be inserted to overflow
+            let page_data_size = PAGE_SIZE - HEADER_SIZE;
+            let max_records_per_page = page_data_size as u64 / context.size;
+            let total_records = max_records_per_page + 1;
+
+            for i in 1..total_records {
+                let value = TestContent { int: i as i32 };
                 kv_store
                     .insert(&i.to_string(), &value)
                     .await
@@ -370,14 +390,15 @@ mod tests {
 
             let pages_flushed = page_cache.flush().await.unwrap();
             assert_eq!(pages_flushed, 2);
-        }
+            total_records
+        };
 
         {
             let page_cache = Arc::new(PageCache::new(storage_manager, "test", 2));
             let kv_store = KVStore::open(page_cache).await.unwrap();
 
             let mut actual = Vec::new();
-            for i in 0..183 {
+            for i in 0..total_records {
                 let value: TestContent = kv_store.get(&i.to_string()).await.unwrap().unwrap();
                 actual.push(value);
             }
