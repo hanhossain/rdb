@@ -197,6 +197,7 @@ impl<S: StorageManager> KVStore<S> {
 mod tests {
     use super::*;
     use crate::storage::tests::InMemoryStorageManager;
+    use tokio::sync::Notify;
 
     #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
     struct TestContent {
@@ -405,5 +406,41 @@ mod tests {
 
             assert_eq!(expected, actual);
         }
+    }
+
+    #[tokio::test]
+    async fn parallel_reads() {
+        // initialize kv store
+        let storage_manager = InMemoryStorageManager::new();
+        let page_cache = Arc::new(PageCache::new(storage_manager.clone(), "test", 2));
+        let kv_store = KVStore::new(page_cache.clone());
+
+        // insert and flush
+        let expected = TestContent { int: 42 };
+        kv_store.insert("expected", &expected).await.unwrap();
+        page_cache.flush().await.unwrap();
+
+        let tx1 = Arc::new(Notify::new());
+        let rx1 = tx1.clone();
+        let tx2 = Arc::new(Notify::new());
+        let rx2 = tx2.clone();
+
+        let kv_store1 = kv_store.clone();
+        let t1 = tokio::spawn(async move {
+            let actual: TestContent = kv_store1.get("expected").await.unwrap().unwrap();
+            tx1.notify_one();
+            rx2.notified().await;
+            actual
+        });
+        let t2 = tokio::spawn(async move {
+            let actual: TestContent = kv_store.get("expected").await.unwrap().unwrap();
+            tx2.notify_one();
+            rx1.notified().await;
+            actual
+        });
+
+        let (actual1, actual2) = tokio::join!(t1, t2);
+        assert_eq!(actual1.unwrap(), expected);
+        assert_eq!(actual2.unwrap(), expected);
     }
 }
