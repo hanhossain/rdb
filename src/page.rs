@@ -113,9 +113,11 @@ impl<T: StorageManager> PageCache<T> {
         Ok(page)
     }
 
-    /// Flushes all dirty pages and marks them all as clean.
-    pub async fn flush(&self) -> Result<()> {
+    /// Flushes all dirty pages and marks them all as clean. Returns the number of pages flushed.
+    pub async fn flush(&self) -> Result<usize> {
         let mut pages = self.store.lock().await;
+
+        let mut pages_flushed = 0;
 
         for (_, v) in pages.iter_mut() {
             let mut page = v.write().await;
@@ -124,10 +126,11 @@ impl<T: StorageManager> PageCache<T> {
                     .write(&self.path, page.location, &page.buffer)
                     .await?;
                 page.dirty = false;
+                pages_flushed += 1;
             }
         }
 
-        Ok(())
+        Ok(pages_flushed)
     }
 }
 

@@ -226,7 +226,9 @@ mod tests {
         kv_store.insert("expected2", &expected2).await.unwrap();
 
         // Flush page cache. This should ensure all TestContent is the InMemoryStorageManager.
-        page_cache.flush().await.unwrap();
+        let flushed_count = page_cache.flush().await.unwrap();
+        assert_eq!(flushed_count, 1);
+
         let actual1: TestContent = kv_store.get("expected1").await.unwrap().unwrap();
         assert_eq!(expected1, actual1);
 
@@ -326,14 +328,16 @@ mod tests {
 
         for i in 0..183 {
             let value = TestContent { int: i };
-            let context = kv_store
+            let _context = kv_store
                 .insert(&i.to_string(), &value)
                 .await
                 .unwrap()
                 .unwrap();
             expected.push(value);
         }
-        page_cache.flush().await.unwrap();
+        let pages_flushed = page_cache.flush().await.unwrap();
+
+        assert_eq!(pages_flushed, 2);
 
         let mut actual = Vec::new();
         for i in 0..183 {
@@ -364,7 +368,8 @@ mod tests {
                 expected.push(value);
             }
 
-            page_cache.flush().await.unwrap();
+            let pages_flushed = page_cache.flush().await.unwrap();
+            assert_eq!(pages_flushed, 2);
         }
 
         {
