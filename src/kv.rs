@@ -131,21 +131,33 @@ impl<S: StorageManager> KVStore<S> {
         Ok(KVStore(Arc::new(Mutex::new(inner))))
     }
 
-    pub async fn insert<T: Serialize + DeserializeOwned + PartialEq>(
+    /// Inserts the key-value pair if the key does not exist, then returns the location of the record.
+    /// Otherwise, if the key exists and
+    /// - the value matches, then returns `None`.
+    /// - the value does not match, then inserts the updated value and returns the location of the record.
+    pub async fn put<T: Serialize + DeserializeOwned + PartialEq>(
         &self,
         key: &str,
         value: &T,
     ) -> Result<Option<KVEntryContext>> {
         let mut lease = self.0.lock().await;
 
-        if let Some(existing_item) = self
-            .get_internal(key, &lease)
-            .await?
-            .map(|kvp| bincode::deserialize::<T>(&kvp.value).unwrap())
-        {
+        if let Some(mut existing_record) = self.get_internal(key, &lease).await? {
+            let existing_item: T = bincode::deserialize(&existing_record.value).unwrap();
             if &existing_item == value {
                 return Ok(None);
             }
+
+            existing_record.is_deleted = true;
+            let page = lease.page_cache.get_page(existing_record.location).await?;
+            let mut page = page.write().await;
+            let offset = existing_record.location % PAGE_SIZE as u64;
+            let offset_end = offset + bincode::serialized_size(&existing_record).unwrap();
+            bincode::serialize_into(
+                &mut page.buffer_mut()[offset as usize..offset_end as usize],
+                &existing_record,
+            )
+            .unwrap();
         }
 
         let mut pair = KVPair {
@@ -271,11 +283,11 @@ mod tests {
 
         // insert 1
         let expected1 = TestContent { int: 1 };
-        kv_store.insert("expected1", &expected1).await.unwrap();
+        kv_store.put("expected1", &expected1).await.unwrap();
 
         // insert 2
         let expected2 = TestContent { int: 2 };
-        kv_store.insert("expected2", &expected2).await.unwrap();
+        kv_store.put("expected2", &expected2).await.unwrap();
 
         // Flush page cache. This should ensure all TestContent is the InMemoryStorageManager.
         let flushed_count = page_cache.flush().await.unwrap();
@@ -297,15 +309,11 @@ mod tests {
 
         // insert 1
         let expected = TestContent { int: 1 };
-        kv_store
-            .insert("expected", &expected)
-            .await
-            .unwrap()
-            .unwrap();
+        kv_store.put("expected", &expected).await.unwrap().unwrap();
         page_cache.flush().await.unwrap();
 
         // insert 2
-        let context2 = kv_store.insert("expected", &expected).await.unwrap();
+        let context2 = kv_store.put("expected", &expected).await.unwrap();
         page_cache.flush().await.unwrap();
         assert!(context2.is_none());
     }
@@ -319,19 +327,11 @@ mod tests {
 
         // insert 1
         let original = TestContent { int: 1 };
-        let orig_ctx = kv_store
-            .insert("expected", &original)
-            .await
-            .unwrap()
-            .unwrap();
+        let orig_ctx = kv_store.put("expected", &original).await.unwrap().unwrap();
         page_cache.flush().await.unwrap();
 
         let expected = TestContent { int: 42 };
-        let new_ctx = kv_store
-            .insert("expected", &expected)
-            .await
-            .unwrap()
-            .unwrap();
+        let new_ctx = kv_store.put("expected", &expected).await.unwrap().unwrap();
         page_cache.flush().await.unwrap();
 
         // verify it's not using the same location on disk
@@ -351,7 +351,7 @@ mod tests {
             let kv_store = KVStore::new(page_cache.clone());
 
             // insert
-            kv_store.insert("expected", &expected).await.unwrap();
+            kv_store.put("expected", &expected).await.unwrap();
             page_cache.flush().await.unwrap();
 
             // verify inserted
@@ -380,7 +380,7 @@ mod tests {
 
         // insert one
         let value = TestContent { int: 0 };
-        let context = kv_store.insert("0", &value).await.unwrap().unwrap();
+        let context = kv_store.put("0", &value).await.unwrap().unwrap();
         expected.push(value);
 
         // calculate how many need to be inserted to overflow
@@ -390,11 +390,7 @@ mod tests {
 
         for i in 1..total_records {
             let value = TestContent { int: i as i32 };
-            let _context = kv_store
-                .insert(&i.to_string(), &value)
-                .await
-                .unwrap()
-                .unwrap();
+            let _context = kv_store.put(&i.to_string(), &value).await.unwrap().unwrap();
             expected.push(value);
         }
         let pages_flushed = page_cache.flush().await.unwrap();
@@ -422,7 +418,7 @@ mod tests {
 
             // insert one
             let value = TestContent { int: 0 };
-            let context = kv_store.insert("0", &value).await.unwrap().unwrap();
+            let context = kv_store.put("0", &value).await.unwrap().unwrap();
             expected.push(value);
 
             // calculate how many need to be inserted to overflow
@@ -432,11 +428,7 @@ mod tests {
 
             for i in 1..total_records {
                 let value = TestContent { int: i as i32 };
-                kv_store
-                    .insert(&i.to_string(), &value)
-                    .await
-                    .unwrap()
-                    .unwrap();
+                kv_store.put(&i.to_string(), &value).await.unwrap().unwrap();
                 expected.push(value);
             }
 
@@ -468,7 +460,7 @@ mod tests {
 
         // insert and flush
         let expected = TestContent { int: 42 };
-        kv_store.insert("expected", &expected).await.unwrap();
+        kv_store.put("expected", &expected).await.unwrap();
         page_cache.flush().await.unwrap();
 
         let tx1 = Arc::new(Notify::new());
@@ -504,11 +496,11 @@ mod tests {
 
         // insert 1
         let expected1 = TestContent { int: 1 };
-        kv_store.insert("expected1", &expected1).await.unwrap();
+        kv_store.put("expected1", &expected1).await.unwrap();
 
         // insert 2
         let expected2 = TestContent { int: 2 };
-        kv_store.insert("expected2", &expected2).await.unwrap();
+        kv_store.put("expected2", &expected2).await.unwrap();
 
         let flushed_count = page_cache.flush().await.unwrap();
         assert_eq!(flushed_count, 1);
@@ -536,10 +528,10 @@ mod tests {
             let kv_store = KVStore::new(page_cache.clone());
 
             // insert 1
-            kv_store.insert("expected1", &expected).await.unwrap();
+            kv_store.put("expected1", &expected).await.unwrap();
 
             // insert 2
-            kv_store.insert("expected2", &expected).await.unwrap();
+            kv_store.put("expected2", &expected).await.unwrap();
 
             let removed = kv_store.remove("expected1").await.unwrap();
             assert!(removed);
