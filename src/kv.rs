@@ -11,17 +11,20 @@ use tokio::sync::{Mutex, MutexGuard};
 
 const KEY_SIZE_SIZE: usize = size_of::<u64>();
 const VALUE_SIZE_SIZE: usize = size_of::<u64>();
+const IS_DELETED_SIZE: usize = size_of::<bool>();
 
 /// The serialized key-value pair.
 ///
 /// Memory layout:
-/// | key size | key | value size | value |
+/// | key size | key | value size | value | is_deleted |
 #[derive(Debug, Serialize, Deserialize)]
 struct KVPair {
     #[serde(skip)]
     location: u64,
     key: String,
     value: Vec<u8>,
+    /// Tombstone to denote whether the record was removed.
+    is_deleted: bool,
 }
 
 impl KVPair {
@@ -78,9 +81,15 @@ impl<S: StorageManager> KVStore<S> {
 
             let buffer = lease.buffer();
             let mut offset = HEADER_SIZE;
+            let page_length = HEADER_SIZE + lease.header.size as usize;
 
             loop {
-                let pair: KVPair = bincode::deserialize(&buffer[offset..]).unwrap();
+                // if there's mo more data in this page we can finish reading it
+                if offset == page_length {
+                    break;
+                }
+
+                let pair: KVPair = bincode::deserialize(&buffer[offset..page_length]).unwrap();
                 if pair.is_empty() {
                     break;
                 }
@@ -89,7 +98,9 @@ impl<S: StorageManager> KVStore<S> {
                     next_location = page_location + HEADER_SIZE as u64;
                 }
 
-                store.insert(pair.key, next_location);
+                if !pair.is_deleted {
+                    store.insert(pair.key, next_location);
+                }
 
                 // figure out where the next pair is
                 let key_size =
@@ -100,8 +111,11 @@ impl<S: StorageManager> KVStore<S> {
                         .try_into()
                         .unwrap(),
                 );
-                let size =
-                    KEY_SIZE_SIZE + key_size as usize + VALUE_SIZE_SIZE + value_size as usize;
+                let size = KEY_SIZE_SIZE
+                    + key_size as usize
+                    + VALUE_SIZE_SIZE
+                    + value_size as usize
+                    + IS_DELETED_SIZE;
                 offset += size;
                 next_location += size as u64;
             }
@@ -124,7 +138,11 @@ impl<S: StorageManager> KVStore<S> {
     ) -> Result<Option<KVEntryContext>> {
         let mut lease = self.0.lock().await;
 
-        if let Some(existing_item) = self.get_internal::<T>(key, &lease).await? {
+        if let Some(existing_item) = self
+            .get_internal(key, &lease)
+            .await?
+            .map(|kvp| bincode::deserialize::<T>(&kvp.value).unwrap())
+        {
             if &existing_item == value {
                 return Ok(None);
             }
@@ -134,6 +152,7 @@ impl<S: StorageManager> KVStore<S> {
             location: lease.next_location,
             key: key.to_string(),
             value: bincode::serialize(value).unwrap(),
+            is_deleted: false,
         };
 
         let mut page_location = start_of_page(pair.location);
@@ -169,14 +188,46 @@ impl<S: StorageManager> KVStore<S> {
 
     pub async fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
         let lease = self.0.lock().await;
-        self.get_internal(key, &lease).await
+        let entry = self
+            .get_internal(key, &lease)
+            .await?
+            .map(|kvp| bincode::deserialize(&kvp.value).unwrap());
+        Ok(entry)
     }
 
-    async fn get_internal<'a, T: DeserializeOwned>(
+    /// Removes a key from the KVStore. Returns the original object if it existed.
+    pub async fn remove(&self, key: &str) -> Result<bool> {
+        let mut lease = self.0.lock().await;
+        if let Some(mut entry) = self.get_internal(key, &lease).await? {
+            if !entry.is_deleted {
+                entry.is_deleted = true;
+                let page = lease.page_cache.get_page(entry.location).await?;
+                let mut page = page.write().await;
+
+                let buffer = page.buffer_mut();
+                let offset = entry.location % PAGE_SIZE as u64;
+                let size = bincode::serialized_size(&entry).unwrap() as usize;
+
+                bincode::serialize_into(
+                    &mut buffer[offset as usize..offset as usize + size],
+                    &entry,
+                )
+                .unwrap();
+                lease.store.remove(key);
+                Ok(true)
+            } else {
+                unreachable!();
+            }
+        } else {
+            Ok(false)
+        }
+    }
+
+    async fn get_internal<'a>(
         &'a self,
         key: &str,
         lease: &MutexGuard<'a, KVStoreInner<S>>,
-    ) -> Result<Option<T>> {
+    ) -> Result<Option<KVPair>> {
         let result = match lease.store.get(key) {
             None => None,
             Some(location) => {
@@ -184,9 +235,9 @@ impl<S: StorageManager> KVStore<S> {
                 let page = lease.page_cache.get_page(page_location).await?;
                 let page = page.read().await;
                 let offset = (*location - page_location) as usize;
-                let pair: KVPair = bincode::deserialize(&page.buffer()[offset..]).unwrap();
-                let value: T = bincode::deserialize(&pair.value).unwrap();
-                Some(value)
+                let mut pair: KVPair = bincode::deserialize(&page.buffer()[offset..]).unwrap();
+                pair.location = *location;
+                Some(pair)
             }
         };
         Ok(result)
@@ -442,5 +493,73 @@ mod tests {
         let (actual1, actual2) = tokio::join!(t1, t2);
         assert_eq!(actual1.unwrap(), expected);
         assert_eq!(actual2.unwrap(), expected);
+    }
+
+    #[tokio::test]
+    async fn remove_item() {
+        // initialize kv store
+        let storage_manager = InMemoryStorageManager::new();
+        let page_cache = Arc::new(PageCache::new(storage_manager.clone(), "test", 2));
+        let kv_store = KVStore::new(page_cache.clone());
+
+        // insert 1
+        let expected1 = TestContent { int: 1 };
+        kv_store.insert("expected1", &expected1).await.unwrap();
+
+        // insert 2
+        let expected2 = TestContent { int: 2 };
+        kv_store.insert("expected2", &expected2).await.unwrap();
+
+        let flushed_count = page_cache.flush().await.unwrap();
+        assert_eq!(flushed_count, 1);
+
+        // remove 1
+        kv_store.remove("expected1").await.unwrap();
+
+        let flushed_count = page_cache.flush().await.unwrap();
+        assert_eq!(flushed_count, 1);
+
+        let actual1: Option<TestContent> = kv_store.get("expected1").await.unwrap();
+        assert_eq!(actual1, None);
+
+        let actual2: TestContent = kv_store.get("expected2").await.unwrap().unwrap();
+        assert_eq!(expected2, actual2);
+    }
+
+    #[tokio::test]
+    async fn remove_then_load_from_file() {
+        let storage_manager = InMemoryStorageManager::new();
+        let expected = TestContent { int: 1 };
+
+        {
+            let page_cache = Arc::new(PageCache::new(storage_manager.clone(), "test", 2));
+            let kv_store = KVStore::new(page_cache.clone());
+
+            // insert 1
+            kv_store.insert("expected1", &expected).await.unwrap();
+
+            // insert 2
+            kv_store.insert("expected2", &expected).await.unwrap();
+
+            let removed = kv_store.remove("expected1").await.unwrap();
+            assert!(removed);
+
+            // flush page
+            let pages_flushed = page_cache.flush().await.unwrap();
+            assert_eq!(pages_flushed, 1);
+        }
+
+        {
+            let page_cache = Arc::new(PageCache::new(storage_manager.clone(), "test", 2));
+            let kv_store = KVStore::open(page_cache).await.unwrap();
+
+            // item 1 should not exist
+            let actual: Option<TestContent> = kv_store.get("expected1").await.unwrap();
+            assert_eq!(actual, None);
+
+            // item 2 should exist
+            let actual: TestContent = kv_store.get("expected2").await.unwrap().unwrap();
+            assert_eq!(expected, actual);
+        }
     }
 }
