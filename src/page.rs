@@ -1,6 +1,8 @@
 use crate::storage::{StorageManager, PAGE_SIZE};
 use lru::LruCache;
-use serde::{Deserialize, Serialize};
+use serde::de::Error;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt::Formatter;
 use std::mem::size_of;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -13,9 +15,44 @@ pub const HEADER_SIZE: usize = size_of::<Header>();
 ///
 /// Memory layout:
 /// | size |
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Header {
     pub size: u16,
+}
+
+impl Serialize for Header {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u16(self.size)
+    }
+}
+
+impl<'de> Deserialize<'de> for Header {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Visitor;
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Header;
+
+            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+                formatter.write_str("a valid page header")
+            }
+
+            fn visit_u16<E>(self, v: u16) -> std::result::Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(Header { size: v })
+            }
+        }
+
+        deserializer.deserialize_u16(Visitor)
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -353,5 +390,20 @@ mod tests {
 
         assert!(!page_cache.get_page(0).await.unwrap().read().await.dirty);
         assert!(!page_cache.get_page(1).await.unwrap().read().await.dirty);
+    }
+
+    #[test]
+    fn header_serialize() {
+        let header = Header { size: 42 };
+        let serialized = bincode::serialize(&header).unwrap();
+        assert_eq!(serialized, vec![42, 0]);
+    }
+
+    #[test]
+    fn header_serialize_and_deserialize() {
+        let header = Header { size: 42 };
+        let serialized = bincode::serialize(&header).unwrap();
+        let deserialized: Header = bincode::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized, header);
     }
 }
