@@ -17,10 +17,24 @@ handle opening, reading, and writing to the file.
 - Node types 
   - Inner Node
     - Number of max keys in a node depends on key size.
-      - Won't vary in a tree, can be part of tree metadata. 
+      - Won't vary in a tree, can be part of tree metadata.
   - Leaf Node
     - Number of max key value pairs will vary depending on the size of the key + value.
     - primary tree will have all tuples, index trees will only have the index and primary key.
+    - Layout: | header | tuple1 | tuple2 | tuple3 |
+    - Header layout: | previous | next | tuple count | 
+    - Tuple layout: | key | column1 | column2 | ... | columnN |
+    ```
+    Layout
+    |-----------------------------------------------------------|
+    | |-Header-||-Leaf Header-----||-Tuple0-------------------| |
+    | |  size  || previous | next || key0 | column1 | column2 | |
+    | |--------||-----------------||--------------------------| |
+    | |-Tuple1-------------------||-Tuple2-------------------|  |
+    | | key0 | column1 | column2 || key1 | column1 | column2 |  |
+    | |--------------------------||--------------------------|  |
+    |-----------------------------------------------------------|
+    ```
 - node buffer is a full page
 
 ### KV Store
