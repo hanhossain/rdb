@@ -21,37 +21,37 @@ impl Serialize for Header {
     }
 }
 
-struct Visitor;
-
-impl<'de> serde::de::Visitor<'de> for Visitor {
-    type Value = Header;
-
-    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-        formatter.write_str("a valid leaf node header")
-    }
-
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        let previous = seq
-            .next_element()?
-            .ok_or_else(|| serde::de::Error::custom("looking for tuple of size 2"))?;
-        let next = seq
-            .next_element()?
-            .ok_or_else(|| serde::de::Error::custom("looking for tuple of size 2"))?;
-        Ok(Header {
-            previous: if previous == 0 { None } else { Some(previous) },
-            next: if next == 0 { None } else { Some(next) },
-        })
-    }
-}
-
 impl<'de> Deserialize<'de> for Header {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
+        struct Visitor;
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Header;
+
+            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+                formatter.write_str("a valid leaf node header")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let previous = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::custom("looking for tuple of size 2"))?;
+                let next = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::custom("looking for tuple of size 2"))?;
+                Ok(Header {
+                    previous: if previous == 0 { None } else { Some(previous) },
+                    next: if next == 0 { None } else { Some(next) },
+                })
+            }
+        }
+
         deserializer.deserialize_tuple(2, Visitor)
     }
 }
