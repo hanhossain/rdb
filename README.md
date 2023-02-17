@@ -23,17 +23,17 @@ handle opening, reading, and writing to the file.
     - primary tree will have all tuples, index trees will only have the index and primary key.
     - Layout: | header | tuple1 | tuple2 | tuple3 |
     - Header layout: | previous | next | tuple count | 
-    - Tuple layout: | key | column1 | column2 | ... | columnN |
+    - Tuple layout: | column1 | column2 | ... | columnN |
     ```
     Layout
-    |-----------------------------------------------------------|
-    | |-Header-||-Leaf Header-----||-Tuple0-------------------| |
-    | |  size  || previous | next || key0 | column1 | column2 | |
-    | |--------||-----------------||--------------------------| |
-    | |-Tuple1-------------------||-Tuple2-------------------|  |
-    | | key0 | column1 | column2 || key1 | column1 | column2 |  |
-    | |--------------------------||--------------------------|  |
-    |-----------------------------------------------------------|
+    |-----------------------------------------------------------------|
+    | |-Header-||-Leaf Header-----||-Tuple0----------------------|    |
+    | |  size  || previous | next || column0 | column1 | column2 |    |
+    | |--------||-----------------||-----------------------------|    |
+    | |-Tuple1----------------------||-Tuple2----------------------|  |
+    | | column0 | column1 | column2 || column0 | column1 | column2 |  |
+    | |-----------------------------||-----------------------------|  |
+    |-----------------------------------------------------------------|
     ```
 - node buffer is a full page
 
