@@ -2,6 +2,10 @@ use serde::de::SeqAccess;
 use serde::ser::SerializeTuple;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::Formatter;
+use std::mem::size_of;
+
+/// Size of the leaf header.
+pub const HEADER_SIZE: usize = size_of::<u64>() * 2;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Header {

@@ -9,7 +9,11 @@ use std::sync::Arc;
 use tokio::io::Result;
 use tokio::sync::{Mutex, RwLock};
 
-pub const HEADER_SIZE: usize = size_of::<Header>();
+/// Size of the page header.
+pub const HEADER_SIZE: usize = size_of::<u16>();
+
+/// Size remaining in a page after the page header.
+pub const DATA_SIZE: usize = PAGE_SIZE - HEADER_SIZE;
 
 /// Header to denote size on page.
 ///
