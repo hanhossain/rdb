@@ -21,19 +21,16 @@ handle opening, reading, and writing to the file.
   - Leaf Node
     - Number of max key value pairs will vary depending on the size of the key + value.
     - primary tree will have all tuples, index trees will only have the index and primary key.
-    - Layout: | header | tuple1 | tuple2 | tuple3 |
-    - Header layout: | previous | next | tuple count | 
-    - Tuple layout: | column1 | column2 | ... | columnN |
     ```
     Layout
-    |-----------------------------------------------------------------|
-    | |-Header-||-Leaf Header-----||-Tuple0----------------------|    |
-    | |  size  || previous | next || column0 | column1 | column2 |    |
-    | |--------||-----------------||-----------------------------|    |
-    | |-Tuple1----------------------||-Tuple2----------------------|  |
-    | | column0 | column1 | column2 || column0 | column1 | column2 |  |
-    | |-----------------------------||-----------------------------|  |
-    |-----------------------------------------------------------------|
+    |----------------------------------------------------------------|
+    | |-Header-||-Node Header-||-Leaf Header-----|                   |
+    | |  size  ||  node type  || previous | next |                   |
+    | |--------||-------------||-----------------|                   |
+    | |-Tuple0----------------------||-Tuple1----------------------| |
+    | | column0 | column1 | column2 || column0 | column1 | column2 | |
+    | |-----------------------------||-----------------------------| |
+    |--------------------------------------------------------------- |
     ```
 - node buffer is a full page
 
