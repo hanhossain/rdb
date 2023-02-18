@@ -5,10 +5,11 @@ use std::fmt::Formatter;
 use std::mem::size_of;
 
 /// Size of the leaf header.
-pub const HEADER_SIZE: usize = size_of::<u64>() * 2;
+pub const HEADER_SIZE: usize = size_of::<usize>() + size_of::<u64>() * 2;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Header {
+    pub count: usize,
     pub previous: Option<u64>,
     pub next: Option<u64>,
 }
@@ -18,7 +19,8 @@ impl Serialize for Header {
     where
         S: Serializer,
     {
-        let mut s = serializer.serialize_tuple(2)?;
+        let mut s = serializer.serialize_tuple(3)?;
+        s.serialize_element(&self.count)?;
         s.serialize_element(&self.previous.unwrap_or(0))?;
         s.serialize_element(&self.next.unwrap_or(0))?;
         s.end()
@@ -43,20 +45,24 @@ impl<'de> Deserialize<'de> for Header {
             where
                 A: SeqAccess<'de>,
             {
+                let count = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::custom("looking for tuple of size 3"))?;
                 let previous = seq
                     .next_element()?
-                    .ok_or_else(|| serde::de::Error::custom("looking for tuple of size 2"))?;
+                    .ok_or_else(|| serde::de::Error::custom("looking for tuple of size 3"))?;
                 let next = seq
                     .next_element()?
-                    .ok_or_else(|| serde::de::Error::custom("looking for tuple of size 2"))?;
+                    .ok_or_else(|| serde::de::Error::custom("looking for tuple of size 3"))?;
                 Ok(Header {
+                    count,
                     previous: if previous == 0 { None } else { Some(previous) },
                     next: if next == 0 { None } else { Some(next) },
                 })
             }
         }
 
-        deserializer.deserialize_tuple(2, Visitor)
+        deserializer.deserialize_tuple(3, Visitor)
     }
 }
 
@@ -67,19 +73,21 @@ mod tests {
     #[test]
     fn header_serialize() {
         let header = Header {
+            count: 5,
             previous: Some(1),
             next: Some(2),
         };
         let serialized = bincode::serialize(&header).unwrap();
         assert_eq!(
             serialized,
-            vec![1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0]
+            vec![5, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0]
         );
     }
 
     #[test]
     fn header_serialize_and_deserialize() {
         let header = Header {
+            count: 5,
             previous: Some(1),
             next: Some(2),
         };
@@ -91,12 +99,13 @@ mod tests {
     #[test]
     fn header_serialize_and_deserialize_with_defaults() {
         let header = Header {
+            count: 0,
             previous: None,
             next: None,
         };
 
         let serialized = bincode::serialize(&header).unwrap();
-        assert_eq!(serialized, vec![0; 16]);
+        assert_eq!(serialized, vec![0; 24]);
 
         let deserialized: Header = bincode::deserialize(&serialized).unwrap();
         assert_eq!(deserialized, header);

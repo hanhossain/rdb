@@ -54,4 +54,8 @@ impl Schema {
 
         unreachable!()
     }
+
+    pub fn tuple_size(&self) -> usize {
+        self.columns.iter().map(|x| x.data_type.size()).sum()
+    }
 }
