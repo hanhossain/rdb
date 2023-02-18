@@ -21,7 +21,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn leaf_serialize() {
+    fn header_leaf_serialize() {
         let header = Header {
             node_type: NodeType::Leaf,
         };
@@ -30,7 +30,7 @@ mod tests {
     }
 
     #[test]
-    fn leaf_deserialize() {
+    fn header_leaf_deserialize() {
         let raw = vec![0, 0, 0, 0];
         let header: Header = bincode::deserialize(&raw).unwrap();
 
@@ -41,7 +41,7 @@ mod tests {
     }
 
     #[test]
-    fn inner_serialize() {
+    fn header_inner_serialize() {
         let header = Header {
             node_type: NodeType::Inner,
         };
@@ -50,7 +50,7 @@ mod tests {
     }
 
     #[test]
-    fn inner_deserialize() {
+    fn header_inner_deserialize() {
         let raw = vec![1, 0, 0, 0];
         let header: Header = bincode::deserialize(&raw).unwrap();
 
