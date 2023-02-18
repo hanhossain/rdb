@@ -1,10 +1,9 @@
 use crate::btree::node::leaf::header::Header;
-use crate::btree::node::leaf::tuple::Tuple;
+use crate::btree::tuple::Tuple;
 use crate::page;
 use crate::schema::Schema;
 
 mod header;
-mod tuple;
 
 #[derive(Debug)]
 pub struct LeafNode {
@@ -35,6 +34,7 @@ impl LeafNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::btree::tuple;
     use crate::schema::{Column, DataType};
 
     #[test]
