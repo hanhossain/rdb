@@ -1,3 +1,4 @@
+use crate::btree::node;
 use crate::btree::node::leaf::header::Header;
 use crate::btree::tuple::Tuple;
 use crate::page;
@@ -14,7 +15,7 @@ pub struct LeafNode {
 impl LeafNode {
     /// Calculate the max capacity for the schema.
     pub fn capacity(schema: &Schema) -> usize {
-        let data_size = page::DATA_SIZE - header::HEADER_SIZE;
+        let data_size = page::DATA_SIZE - node::HEADER_SIZE - header::HEADER_SIZE;
         let tuple_data_size: usize = schema.columns.iter().map(|x| x.data_type.size()).sum();
         data_size / tuple_data_size
     }
@@ -53,7 +54,7 @@ mod tests {
             primary_key: String::from("c1"),
         };
 
-        // (page size - page header - header) / (c1 + c2);
+        // (page size - page header - node header - header) / (c1 + c2);
         assert_eq!(LeafNode::capacity(&schema), 509);
     }
 
