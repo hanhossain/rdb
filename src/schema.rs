@@ -25,4 +25,17 @@ pub struct Column {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Schema {
     pub columns: Vec<Column>,
+    pub primary_key: String,
+}
+
+impl Schema {
+    pub fn primary_key_index(&self) -> usize {
+        for i in 0..self.columns.len() {
+            if &self.columns[i].name == &self.primary_key {
+                return i;
+            }
+        }
+
+        unreachable!()
+    }
 }

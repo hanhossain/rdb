@@ -2,7 +2,7 @@ use crate::schema::{DataType, Schema};
 use serde::ser::SerializeTuple;
 use serde::{Serialize, Serializer};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub enum Column {
     Int32(i32),
     Int64(i64),
@@ -31,7 +31,7 @@ impl Serialize for Column {
 
 #[derive(Debug, PartialEq)]
 pub struct Tuple {
-    columns: Vec<Column>,
+    pub columns: Vec<Column>,
 }
 
 impl Tuple {
@@ -119,6 +119,7 @@ mod tests {
                     data_type: DataType::Int64,
                 },
             ],
+            primary_key: String::from("i32"),
         };
         let deserialized = Tuple::deserialize_slice(&data, &schema);
         let expected = Tuple {

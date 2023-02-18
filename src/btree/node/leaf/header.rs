@@ -9,8 +9,8 @@ pub const HEADER_SIZE: usize = size_of::<u64>() * 2;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Header {
-    previous: Option<u64>,
-    next: Option<u64>,
+    pub previous: Option<u64>,
+    pub next: Option<u64>,
 }
 
 impl Serialize for Header {
