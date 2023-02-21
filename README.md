@@ -68,8 +68,12 @@ users:
 | 2 | hulk | Bruce | Banner |
 
 ## TODO:
-- [x] File manager
-- [x] Page manager/cache
-  - [x] read from and write to cache
-  - [x] parallel read/write
-  - [x] callback on cache eviction
+- BTree
+  - Iterator without filter
+  - Iterator with filter
+  - Insert with leaf node split
+  - Insert with inner node split
+  - Update tuples
+  - Remove
+  - Compound primary key
+- Sql implementation
