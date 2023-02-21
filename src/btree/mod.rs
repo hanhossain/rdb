@@ -1,7 +1,7 @@
 mod node;
 mod tuple;
 
-use crate::btree::node::leaf::LeafNode;
+use crate::btree::node::leaf::LeafNodeRefMut;
 use crate::btree::tuple::Tuple;
 use crate::kv::KVStore;
 use crate::page;
@@ -30,10 +30,16 @@ pub struct BTreeStore<S: StorageManager>(Arc<RwLock<BTreeStoreInner<S>>>);
 impl<S: StorageManager> BTreeStore<S> {
     /// Creates a BTreeStore.
     pub async fn new(page_cache: Arc<PageCache<S>>, kv_store: Arc<KVStore<S>>) -> Result<Self> {
-        let new_page_start = kv_store
-            .get(RECORD_DATA_NEW_PAGE_START_KEY)
-            .await?
-            .unwrap_or(0);
+        let new_page_start =
+            if let Some(page_start) = kv_store.get(RECORD_DATA_NEW_PAGE_START_KEY).await? {
+                page_start
+            } else {
+                let page_start = 0;
+                kv_store
+                    .put(RECORD_DATA_NEW_PAGE_START_KEY, &page_start)
+                    .await?;
+                page_start
+            };
         let inner = BTreeStoreInner {
             page_cache,
             new_page_start,
@@ -47,15 +53,8 @@ impl<S: StorageManager> BTreeStore<S> {
         let page = lease.page_cache.get_page(0).await?;
         let mut page = page.write().await;
         let start = page::HEADER_SIZE + node::HEADER_SIZE;
-        let mut node = LeafNode::deserialize_slice(&page.buffer()[start..], schema);
+        let mut node = LeafNodeRefMut::from_buffer(&mut page.buffer_mut()[start..], schema);
         node.insert(tuple, schema);
-
-        // write all changes
-        lease
-            .kv_store
-            .put(RECORD_DATA_NEW_PAGE_START_KEY, &lease.new_page_start)
-            .await?;
-        bincode::serialize_into(&mut page.buffer_mut()[start..], &node).unwrap();
 
         Ok(())
     }

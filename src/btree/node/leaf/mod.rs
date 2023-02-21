@@ -7,6 +7,7 @@ use serde::ser::SerializeTuple;
 use serde::{Serialize, Serializer};
 use std::fmt::Debug;
 use std::mem::size_of;
+use std::ops::{Deref, DerefMut};
 
 pub mod header;
 
@@ -24,7 +25,7 @@ impl LeafNode {
         data_size / schema.tuple_size()
     }
 
-    pub fn deserialize_slice(buffer: &[u8], schema: &Schema) -> Self {
+    fn deserialize_slice(buffer: &[u8], schema: &Schema) -> Self {
         let header: Header = bincode::deserialize(&buffer[..header::HEADER_SIZE]).unwrap();
         let tuple_size = schema.tuple_size();
         let mut tuples = Vec::new();
@@ -63,6 +64,39 @@ impl Serialize for LeafNode {
             s.serialize_element(tuple)?;
         }
         s.end()
+    }
+}
+
+#[derive(Debug)]
+pub struct LeafNodeRefMut<'a> {
+    node: LeafNode,
+    buffer: &'a mut [u8],
+}
+
+impl<'a> LeafNodeRefMut<'a> {
+    pub fn from_buffer(buffer: &'a mut [u8], schema: &Schema) -> Self {
+        let node = LeafNode::deserialize_slice(buffer, schema);
+        LeafNodeRefMut { node, buffer }
+    }
+}
+
+impl<'a> Deref for LeafNodeRefMut<'a> {
+    type Target = LeafNode;
+
+    fn deref(&self) -> &Self::Target {
+        &self.node
+    }
+}
+
+impl<'a> DerefMut for LeafNodeRefMut<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.node
+    }
+}
+
+impl<'a> Drop for LeafNodeRefMut<'a> {
+    fn drop(&mut self) {
+        bincode::serialize_into(&mut self.buffer, &self.node).unwrap();
     }
 }
 
