@@ -8,7 +8,7 @@ use serde::{Serialize, Serializer};
 use std::fmt::Debug;
 use std::mem::size_of;
 
-mod header;
+pub mod header;
 
 #[derive(Debug, PartialEq)]
 pub struct LeafNode {

@@ -49,7 +49,7 @@ struct KVStoreInner<T: StorageManager> {
 
 // TODO: need to be able to save entries larger than 4096 bytes
 /// A key-value store used for system metadata.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct KVStore<S: StorageManager>(Arc<Mutex<KVStoreInner<S>>>);
 
 impl<S: StorageManager> KVStore<S> {
@@ -456,7 +456,7 @@ mod tests {
         // initialize kv store
         let storage_manager = InMemoryStorageManager::new();
         let page_cache = Arc::new(PageCache::new(storage_manager.clone(), "test", 2));
-        let kv_store = KVStore::new(page_cache.clone());
+        let kv_store = Arc::new(KVStore::new(page_cache.clone()));
 
         // insert and flush
         let expected = TestContent { int: 42 };
@@ -468,7 +468,7 @@ mod tests {
         let tx2 = Arc::new(Notify::new());
         let rx2 = tx2.clone();
 
-        let kv_store1 = kv_store.clone();
+        let kv_store1 = Arc::clone(&kv_store);
         let t1 = tokio::spawn(async move {
             let actual: TestContent = kv_store1.get("expected").await.unwrap().unwrap();
             tx1.notify_one();

@@ -3,9 +3,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::Formatter;
 use std::mem::size_of;
 
-mod leaf;
+pub mod leaf;
 
-const HEADER_SIZE: usize = size_of::<i32>();
+pub const HEADER_SIZE: usize = size_of::<i32>();
 
 #[derive(Debug, PartialEq)]
 pub enum NodeType {
