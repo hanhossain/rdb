@@ -1,10 +1,9 @@
 mod node;
 mod tuple;
 
-use crate::btree::node::leaf::LeafNodeRefMut;
+use crate::btree::node::NodeRefMut;
 use crate::btree::tuple::Tuple;
 use crate::kv::KVStore;
-use crate::page;
 use crate::page::PageCache;
 use crate::schema::Schema;
 use crate::storage::StorageManager;
@@ -52,8 +51,7 @@ impl<S: StorageManager> BTreeStore<S> {
         let lease = self.0.write().await;
         let page = lease.page_cache.get_page(0).await?;
         let mut page = page.write().await;
-        let start = page::HEADER_SIZE + node::HEADER_SIZE;
-        let mut node = LeafNodeRefMut::from_buffer(&mut page.buffer_mut()[start..], schema);
+        let mut node = NodeRefMut::from_page(&mut page, schema);
         node.insert(tuple, schema);
 
         Ok(())
@@ -64,6 +62,7 @@ impl<S: StorageManager> BTreeStore<S> {
 mod tests {
     use super::*;
     use crate::btree::node::leaf;
+    use crate::page;
     use crate::schema::{Column, DataType};
     use crate::storage::tests::InMemoryStorageManager;
 

@@ -40,7 +40,7 @@ impl LeafNode {
         LeafNode { header, tuples }
     }
 
-    pub fn insert(&mut self, tuple: Tuple, schema: &Schema) {
+    pub(super) fn insert(&mut self, tuple: Tuple, schema: &Schema) {
         let key_index = schema.primary_key_index();
         let key = &tuple.columns[key_index];
         if let Err(index) = self

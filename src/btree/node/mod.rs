@@ -1,7 +1,13 @@
+use crate::btree::node::leaf::LeafNodeRefMut;
+use crate::btree::tuple::Tuple;
+use crate::page;
+use crate::page::Page;
+use crate::schema::Schema;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::Formatter;
 use std::mem::size_of;
+use tokio::sync::RwLockWriteGuard;
 
 pub mod leaf;
 
@@ -59,6 +65,31 @@ impl<'de> Deserialize<'de> for NodeType {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Header {
     node_type: NodeType,
+}
+
+#[derive(Debug)]
+pub enum NodeRefMut<'a> {
+    Leaf(LeafNodeRefMut<'a>),
+}
+
+impl<'a> NodeRefMut<'a> {
+    pub fn insert(&mut self, tuple: Tuple, schema: &Schema) {
+        match self {
+            NodeRefMut::Leaf(x) => x.insert(tuple, schema),
+        }
+    }
+
+    pub fn from_page(page: &'a mut RwLockWriteGuard<Page>, schema: &Schema) -> Self {
+        let buffer = page.buffer_mut();
+        let start = page::HEADER_SIZE + HEADER_SIZE;
+        let header: Header = bincode::deserialize(&buffer[page::HEADER_SIZE..start]).unwrap();
+        match header.node_type {
+            NodeType::Leaf => {
+                NodeRefMut::Leaf(LeafNodeRefMut::from_buffer(&mut buffer[start..], schema))
+            }
+            NodeType::Inner => todo!(),
+        }
+    }
 }
 
 #[cfg(test)]
