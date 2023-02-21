@@ -17,10 +17,21 @@ handle opening, reading, and writing to the file.
 - Node types 
   - Inner Node
     - Number of max keys in a node depends on key size.
-      - Won't vary in a tree, can be part of tree metadata. 
+      - Won't vary in a tree, can be part of tree metadata.
   - Leaf Node
     - Number of max key value pairs will vary depending on the size of the key + value.
     - primary tree will have all tuples, index trees will only have the index and primary key.
+    ```
+    Layout
+    |----------------------------------------------------------------|
+    | |-Header-||-Node Header-||-Leaf Header-----|                   |
+    | |  size  ||  node type  || previous | next |                   |
+    | |--------||-------------||-----------------|                   |
+    | |-Tuple0----------------------||-Tuple1----------------------| |
+    | | column0 | column1 | column2 || column0 | column1 | column2 | |
+    | |-----------------------------||-----------------------------| |
+    |--------------------------------------------------------------- |
+    ```
 - node buffer is a full page
 
 ### KV Store
@@ -57,8 +68,12 @@ users:
 | 2 | hulk | Bruce | Banner |
 
 ## TODO:
-- [x] File manager
-- [x] Page manager/cache
-  - [x] read from and write to cache
-  - [x] parallel read/write
-  - [x] callback on cache eviction
+- BTree
+  - Iterator without filter
+  - Iterator with filter
+  - Insert with leaf node split
+  - Insert with inner node split
+  - Update tuples
+  - Remove
+  - Compound primary key
+- Sql implementation
